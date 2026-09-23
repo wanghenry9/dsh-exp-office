@@ -518,12 +518,35 @@ test('★ 页码占位符与 labelFor 逐页取值', () => {
   assert.ok(next2.extractText().text.includes('PAGE-10'))
 })
 
-test('★ 中文叠加文本被明确拒绝（需要嵌入字体）', () => {
+test('★ 中文叠加文本：自动嵌入字体子集，画上去的中文还能被提取', () => {
   const pdf = PdfDocument.open(original)
-  assert.throws(
-    () => pdf.addTextOverlay({ text: '机密' }),
-    (err) => err.code === 'UNSUPPORTED_FEATURE' && /ASCII/.test(err.message)
-  )
+  const result = pdf.addTextOverlay({ text: '机密 · 中文水印 {page}/{total}', position: 'center', gray: 0.85 })
+  assert.ok(result.embedded_font, '含中文时必须嵌入字体子集')
+  assert.ok(result.embedded_font.glyphs > 0)
+  const saved = pdf.save()
+  const back = PdfDocument.open(saved)
+  assert.equal(back.validate().valid, true)
+  const text = back.extractText().text
+  assert.ok(text.includes('机密 · 中文水印'), `水印中文应能读回：${JSON.stringify(text.slice(0, 80))}`)
+  assert.ok(text.includes('机密 · 中文水印 1/'), '占位符 {page} 应逐页替换')
+})
+
+test('★ 中文页码：{page}/{total} 逐页替换且逐页可读', () => {
+  const pdf = PdfDocument.open(original)
+  const result = pdf.addTextOverlay({
+    text: '{page}',
+    position: 'bottom',
+    fontSize: 9,
+    gray: 0.2,
+    labelFor: (index) => `第 ${index + 1} 页`
+  })
+  assert.ok(result.embedded_font)
+  const back = PdfDocument.open(pdf.save())
+  const pages = back.pages().length
+  const texts = Array.from({ length: pages }, (_, i) => back.extractText({ page: i }).text)
+  for (let i = 0; i < pages; i += 1) {
+    assert.ok(texts[i].includes(`第 ${i + 1} 页`), `第 ${i + 1} 页应有中文页码：${JSON.stringify(texts[i].slice(-30))}`)
+  }
 })
 
 test('叠加参数不合法时给出结构错误', () => {

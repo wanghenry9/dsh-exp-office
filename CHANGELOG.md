@@ -5,6 +5,13 @@
 ## [未发布]
 
 ### 新增
+- **中文水印 / 页码**（阶段 5 收尾）：`office_add_pdf_watermark` 与 `office_add_pdf_page_numbers`
+  现在支持中文 —— 叠加式写入的绘制流里挂一份**只带用到的字形的字体子集**
+  （Type0 + CIDFontType2 + FontFile2 + CIDToGIDMap + ToUnicode，与 `office_create_pdf` 复用同一套机制）。
+  实测 3 页中文水印让 80 KB 的样本变 92 KB，**原字节作为前缀一个都没变**。
+  新参数 `cjk_font_path` 可指定字体；不传时自动找本机字体。
+- **`lib/pdf-font.js`**：把字体嵌入逻辑从 `pdf-writer.js` 抽出来，生成与叠加两条路共用
+  （`buildPdfFont` 产出子集/CID 映射/宽度/ToUnicode，`buildType0FontObjects` 产出六个互相引用的 PDF 对象）。
 - **中文 PDF：字体子集嵌入**（阶段 5 收尾）
   - `office_create_pdf` 现在支持中文等非 WinAnsi 字符：自动找本机字体（SimHei / 等线 / 仿宋 / 楷体 /
     微软雅黑 / 宋体 / Noto Sans SC，也可用 `cjk_font_path` 指定），**只保留用到的字形**后按

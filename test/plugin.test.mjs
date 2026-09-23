@@ -1122,14 +1122,18 @@ await test('★ office_add_pdf_watermark 叠加写入且原字节不变', async 
   assert.ok(read.data.text.includes('季度销售报告'), '原有中文文字必须仍可读（资源合并不能丢字体）')
 })
 
-await test('★ office_add_pdf_watermark 拒绝中文水印并保持文件不变', async () => {
+await test('★ office_add_pdf_watermark 中文水印：嵌入字体子集且不破坏原内容', async () => {
   if (!hasPdf) return
   copyFileSync(pdfSource, join(workspace, 'wm-cjk.pdf'))
   const before = readFileSync(join(workspace, 'wm-cjk.pdf'))
-  const result = await call('office_add_pdf_watermark', { path: 'wm-cjk.pdf', text: '机密' })
-  assert.equal(result.success, false)
-  assert.equal(result.error.code, 'UNSUPPORTED_FEATURE')
-  assert.ok(readFileSync(join(workspace, 'wm-cjk.pdf')).equals(before), '拒绝时文件必须原封不动')
+  const result = await callAndValidate('office_add_pdf_watermark', { path: 'wm-cjk.pdf', text: '机密 · 中文水印', position: 'bottom', gray: 0.3 })
+  assert.equal(result.success, true)
+  assert.ok(result.data.embedded_font?.glyphs > 0, '应报告嵌入的字体子集')
+  const after = readFileSync(join(workspace, 'wm-cjk.pdf'))
+  assert.ok(before.length < after.length, '叠加式写入：只追加，文件应变大')
+  assert.ok(after.subarray(0, before.length).equals(before), '叠加式写入：原有字节必须作为前缀保持不变')
+  const text = await callAndValidate('office_read_pdf', { path: 'wm-cjk.pdf', detail: 'text' })
+  assert.ok(text.data.text.includes('机密 · 中文水印'), '中文水印应能被读回')
 })
 
 await test('★ office_add_pdf_page_numbers 逐页编号', async () => {

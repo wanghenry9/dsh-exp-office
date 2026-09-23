@@ -57,10 +57,14 @@ try {
   }
   # PDF reflow moves text inside the page margins into the header/footer story,
   # so page-number overlays only show up there (Content.Text cannot see them).
+  $stories = @()
   try {
     foreach ($section in $doc.Sections) {
       $footer = $section.Footers.Item(1).Range.Text
       $header = $section.Headers.Item(1).Range.Text
+      # 先收集：文档 Close 之后就取不到这些 story 了
+      $stories += "HEADER: $header"
+      $stories += "FOOTER: $footer"
       if ($footer -and $footer.Trim() -ne '') { Write-Output "FOOTER: $($footer.Trim())" }
       if ($header -and $header.Trim() -ne '') { Write-Output "HEADER: $($header.Trim())" }
     }
@@ -74,6 +78,9 @@ try {
     $full = [System.IO.Path]::GetFullPath($TextOut)
     [System.IO.File]::WriteAllText($full, $text, (New-Object System.Text.UTF8Encoding($false)))
     Write-Output "TEXT_OUT: $full"
+    # 页眉页脚 story 另写一个伴随文件：贴边水印/页码会被重排放进 footer story，
+    # Content.Text 看不到它们 —— 校验中文水印必须看这里。
+    [System.IO.File]::WriteAllText("$full.stories", ($stories -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
   }
   if ($Raw) {
     Write-Output 'TEXT-RAW:'

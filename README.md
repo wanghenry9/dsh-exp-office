@@ -20,7 +20,7 @@
 
 ```bash
 # 在工作区中开发与自测
-npm test                      # 全部套件（718 项断言，约 40 秒）
+npm test                      # 全部套件（719 项断言，约 45 秒）
 npm run test:engine           # 引擎：ZIP / XML 最小修改 / 安全防护
 npm run test:xlsx             # XLSX 适配器（含样式与导出）
 npm run test:docx             # DOCX 适配器（读取 / 写入 / 校验）
@@ -32,6 +32,7 @@ npm run test:plugin           # 插件集成：注册 / 端到端 / 事务 / 任
 npm run test:scan             # XLSX 区域读取：字节扫描早停 / 上限 / 与 DOM 参照逐格等价
 npm run test:automation       # 本地联动的 Node 侧（桩脚本，不启动 Office）
 npm run verify:automation     # 本地联动真机验证（真实 Excel/WPS/Word/PowerPoint）
+
 
 npm run test:perf             # 性能基准（小型 + 中型）
 npm run test:perf:large       # 性能基准（追加 50 万单元格大文件；样本由生成器现造）
@@ -320,16 +321,30 @@ npm run verify:boot           # profile 启动自检：副本漂移 + 真实 Cor
 - **原内容流一个字节都不改**：新建一个只画这一行字的内容流，追加到页面 `/Contents` 之后。
   PDF 规定 `/Contents` 数组里的多个流按顺序画在同一张画布上，叠加是天然语义 ——
   这正是开发要求 §八.4 把叠加式列为稳定性最高写法的原因
-- **字体用阅读器内置的 Helvetica（base-14）**，不嵌入字体，所以新增体积只有几百字节到 1 KB
+- **字体用阅读器内置的 Helvetica（base-14）**，不嵌入字体，所以拉丁水印新增体积只有几百字节到 1 KB
+- **中文水印 / 页码自动嵌入字体子集**：含非 WinAnsi 字符时，用 `pdf-font.js` 在叠加流的资源里挂一份
+  **只带用到的字形的 TrueType 子集**（Type0 + CIDFontType2 + FontFile2 + CIDToGIDMap + ToUnicode）。
+  实测 3 页中文水印让 80 KB 的样本变成 92 KB（子集未压缩 38.9 KB），**原字节作为前缀一个都没变**
 - **资源是合并而不是覆盖**：页面级 `/Resources` 会整体覆盖从页面树继承来的资源，
   只写一个含水印字体的资源字典会让**原有文字丢掉字体**（我们实测到中文退化成控制字符）。
-  实现上复制「有效资源」再在其 `/Font` 之上加一个 `Wm`
+  实现上复制「有效资源」再在其 `/Font` 之上加一个 `Wm` / `WmCJK`
 - **字体与资源字典必须内联**：写成 `/Resources → 对象 → /Font → 对象 → /Wm → 对象` 的多级间接引用，
   规范合法、本插件自己的解析器也读得出来，但 **Word 的 PDF 解析器会静默丢弃这些文字** ——
   这个坑只有第三方阅读器能暴露（见下）
+- **嵌入字体的对象号必须一次预留**：Type0 → CIDFont → FontDescriptor → FontFile2 / CIDToGIDMap / ToUnicode
+  是**互相引用**的六个对象，必须先预留真实对象号再构造。踩过一次：内部引用指向了别处，
+  `ToUnicode` 指到一个页面内容流上，**自读的文本全成了 `\u0000`**（自家 `validate()` 照样通过）
 - **淡化用浅灰填充**（`0.9 g`）而不是透明度软掩码（ExtGState SMask）：结果确定、少一层资源依赖
-- **中文水印会被明确拒绝**：CJK 需要嵌入字体子集，本阶段不做，与其画出乱码不如报错
-- 页码支持格式串（`{page}` / `{n}` / `{total}`）、起始编号与页眉/页脚位置
+- 页码支持格式串（`{page}` / `{n}` / `{total}`）、起始编号与页眉/页脚位置；中文页码如「第 {page} 页 / 共 {total} 页」
+
+> **第三方解析器验收（`npm run verify:pdf-cjk-watermark`）**：给真实 3 页 PDF 加中文贴边水印后，
+> Word 的 PDF 重排仍读到**全部 66 个词的原正文**（标题与表格都在），并在 **footer story** 里读到了
+> 我们叠加的中文水印「机密 · 中文水印 1/3」。
+>
+> 同时记一条**观察**：Word 的重排对「整份文档都盖着居中斜向大水印」会退化 ——
+> 实测 3 页全覆盖时它只吐出 31 个词，且页数从 3 变 5；换成贴边（bottom）位置或只盖 1–2 页就一切正常。
+> 我们的读取器与结构校验在这两种情况下都正常，因此判断是 **Word 重排的版面切分行为**，不是文件损坏；
+> 验收用贴边位置，这样它既能独立核对水印文字，也能核对原正文。
 
 **对象图重写（回收字节 / 拆分）** —— `office_optimize_pdf` / `office_split_pdf`：
 
@@ -396,7 +411,7 @@ npm run verify:boot           # profile 启动自检：副本漂移 + 真实 Cor
   斜向水印目前只验证到「内容流写对了、文件结构合法、本插件能读回文字」。
   要视觉确认需要能渲染 PDF 的引擎，本机没有（宿主内置的是 LibreOfficeKit，不接受 PDF 输入；
   Edge 无头模式不加载 PDF 插件；profile 里也没有 pdfjs/canvas）。**水平水印（`position: top|bottom`）则是被独立阅读器读到的**
-- **中文水印需要嵌入字体子集**，未实现，会明确拒绝而不是画出乱码
+- **中文水印/页码需要嵌入字体子集** —— 现已实现（自动嵌入，也可用 `cjk_font_path` 指定字体）
 - 增量更新会让文件**变大**（旧对象与旧 xref 保留在文件里）；用 `office_optimize_pdf` 重写即可回收，
   但重写后普通对象不再走对象流压缩，**体积不一定比原始文件更小**（会返回 `NO_SIZE_GAIN` 提示）
 - 重写会**丢弃对象流与交叉引用流**（换成经典 xref 表与普通对象）：语义等价、布局不同，
@@ -718,7 +733,7 @@ WPS 演示（`npm run verify:pptx-slide-ops-wps`）把它识别为 `type=17`、�
 - **不执行宏**：`.xlsm` 的 VBA 按原字节保留但从不执行。
 - **CSV 导出是有损的**：公式、样式、图表、批注与其它工作表都不会保留，会返回 `LOSSY_CONVERT` 警告。
 - **样式能力限于字体/填充/数字格式/水平对齐**，不支持边框、垂直对齐、条件格式创建。
-- **不支持**：图表创建、透视表修改、PDF 表单填写/批注/合并拆分、水印的**中文**文字、OCR、PDF → Office 反向转换（阶段 5–7 计划）。
+- **不支持**：图表创建、透视表修改、PDF 表单填写/批注/合并拆分、OCR、PDF → Office 反向转换（阶段 5–7 计划）。
 - **`<c><v/></c>`（空值元素）读出来是 `0` 而不是 `null`**：`Number('')` 的历史行为，改造前后一致；要改成 `null` 属于语义变更，需要单独决策（已记在任务清单）。
 - **本地引擎联动是「单用户桌面」级别**：默认关闭、只清理自己启动的进程、不做受限账户/沙箱隔离（开发要求建议的隔离需要运维层面配合）；视觉是否变化也没有回归测试（需要渲染成图片才能判定）。
 - **页码/日期等域不写死数字**：域的值由 Word 计算，插件写入的是域代码与一个缓存值；请按 F9（或打印预览）刷新。WPS 文字能正常打开带域文档，但 WPS COM 的 `Fields.Count` **只统计正文域**，页眉页脚里的域不出现在该集合中 —— 那里读到 0 不代表域没写进去（Word 的 `Section.Headers/Footers.Range.Fields` 读到 1，类型 33 即 `wdFieldPage`）。
@@ -789,8 +804,8 @@ Excel 重算后读到 **3**、WPS 重算后同样读到 **3**；Word / PowerPoin
 `simsun.ttc` → `NotoSansSC-VF.ttf`；也可以用 `cjk_font_path` 指定。**没有任何可用字体时明确报错**
 （列出试过的路径），而不是画乱码。
 
-**仍然不做**：富文本（行内混排样式）、图片、矢量图形、表格框线与页码；
-中文**水印/叠加文字**（`pdf.overlay.cjk`）也还没做 —— 它需要把同一套字体嵌入机制接到叠加流里，属后续工作。
+**仍然不做**：富文本（行内混排样式）、图片、矢量图形、表格框线与页码。
+中文**水印 / 页码**已经做了 —— `office_add_pdf_watermark` / `office_add_pdf_page_numbers` 复用同一套字体嵌入机制（见「叠加式写入」一节）。
 
 ## 表格提取（阶段 5 收尾）
 
@@ -860,7 +875,7 @@ npm install /path/to/new-version      # 从新目录升级（会替换旧版本�
 ## 目录结构
 
 ```
-lib/                      17 个模块，无第三方运行时依赖
+lib/                      18 个模块，无第三方运行时依赖
   index.js        Cordis 插件入口：解析 defineTool 并注册工具
   capabilities.js 能力清单（插件版本/协议版本/已实现与未实现能力）
   tools.js        90 个工具定义 + 统一响应信封 + 预览-执行-回滚五件套
@@ -877,9 +892,10 @@ lib/                      17 个模块，无第三方运行时依赖
   convert.js      Office → PDF（延迟解析宿主内置 LibreOffice 引擎）
   automation.js   本地 Office/WPS 联动（开关 / 超时 / 进程回收 / 审计）
 
+
   office-automation.ps1  唯一与本地 Office/WPS 通话的脚本（固定模板、纯 ASCII、参数化）
 
-test/                     56 个文件
+test/                     57 个文件
   all.mjs               总入口（npm test）
   engine.test.mjs       引擎：ZIP / XML 最小修改 / 安全防护
   xlsx.test.mjs         XLSX 适配器
