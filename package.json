@@ -78,6 +78,8 @@
     "fixture:pdf": "node test/make-pdf-fixture.mjs",
     "fixture:pdf-created": "node test/make-pdf-created-fixture.mjs",
     "verify:pdf-created": "pwsh -File test/pdf-open-check.ps1 -Path test/fixtures/created-from-scratch.pdf -Match PDF-FROM-SCRATCH-MARKER",
+    "fixture:pdf-cjk": "node test/make-pdf-cjk-fixture.mjs",
+    "verify:pdf-cjk": "node test/make-pdf-cjk-fixture.mjs --verify",
     "fixture:pdf-annotation": "node test/make-pdf-annotation-fixture.mjs",
     "fixture:pdf-form": "node test/make-pdf-form-fixture.mjs",
     "verify:pdf-form": "pwsh -File test/pdf-open-check.ps1 -Path test/fixtures/form-filled.pdf",

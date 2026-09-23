@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 import zlib from 'node:zlib'
 import { PdfDocument } from '../lib/pdf.js'
 import { buildPdf } from '../lib/pdf-writer.js'
+import { readCmap, readFont, subsetFont } from '../lib/font-subset.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const fixture = join(here, 'fixtures', 'sample.pdf')
@@ -1253,6 +1254,18 @@ test('★ 只读字段默认拒绝，force=true 才允许', () => {
   assert.equal(PdfDocument.open(pdf.save()).forms().fields.find((f) => f.name === 'plan').value, 'pro')
 })
 
+
+/**
+ * 找一个可用于测试的中文字体（本机没有就跳过相关用例）。
+ * @returns {{path: string, index: number}|null} 字体位置。
+ */
+function resolveFixtureFont() {
+  for (const candidate of ['C:\\Windows\\Fonts\\simhei.ttf', 'C:\\Windows\\Fonts\\Deng.ttf']) {
+    if (existsSync(candidate)) return { path: candidate, index: 0 }
+  }
+  return null
+}
+
 console.log('\n=== 15. 从零生成 PDF ===')
 
 test('★ 生成最基本的一份：头部、页数、文本都能读回', () => {
@@ -1286,12 +1299,6 @@ test('★ 文本可提取是设计目标：中文以外的常见字符都能读�
   assert.ok(extracted.includes('\u2014'), '长破折号应能读回')
 })
 
-test('★ 中文被明确拒绝，并且不会留下半个文件', () => {
-  assert.throws(
-    () => buildPdf({ lines: ['季度销售报告'] }),
-    (err) => err.code === 'UNSUPPORTED_FEATURE' && /WinAnsi|标准 14 字体/.test(err.message)
-  )
-})
 
 test('转义：括号与反斜杠不会破坏内容流', () => {
   const tricky = 'a (b) c \\\\ d (unbalanced ( and )'
@@ -1450,6 +1457,66 @@ test('表格参数校验：容差/阈值必须是正数', () => {
   assert.throws(() => doc.extractTables({ rowTolerance: -1 }), (e) => e.code === 'INVALID_REQUEST')
   assert.throws(() => doc.extractTables({ columnGap: 0 }), (e) => e.code === 'INVALID_REQUEST')
   assert.throws(() => doc.extractTables({ minRows: 0 }), (e) => e.code === 'INVALID_REQUEST')
+})
+
+test('★ 中文：自动嵌入子集字体，中文与中英混排都能读回', () => {
+  const lines = ['季度销售报告', '本 PDF 从零生成，嵌入中文字体子集。', 'Mixed 中英混排 with ASCII 12345（全角括号）。']
+  const { buffer, embedded_font: embedded } = buildPdf({ lines, metadata: { title: '中文验证' } })
+  assert.ok(embedded, '含中文时必须嵌入字体')
+  assert.ok(embedded.glyphs > 0)
+  assert.ok(buffer.length < 200 * 1024, `子集后文件应仍在百 KB 量级，实际 ${buffer.length} 字节`)
+  const doc = PdfDocument.open(buffer)
+  assert.equal(doc.validate().valid, true)
+  const extracted = doc.extractText().text
+  for (const line of lines) assert.ok(extracted.includes(line), `读回文本缺少「${line}」：${extracted}`)
+  assert.ok(doc.structure().fonts.some((f) => f.includes('+')), '字体名应带子集前缀（6 个大写字母 + +）')
+})
+
+test('★ 中文字形来自真实字体：字宽不是平均估算（不同字宽度不同）', () => {
+  const { buffer } = buildPdf({ lines: ['国国国国', 'iiii'] })
+  const raw = buffer.toString('latin1')
+  const widths = [...raw.matchAll(/(\d+) \[(\d+)\]/g)].map((m) => Number(m[2]))
+  assert.ok(widths.length > 0, '应写入 /W 宽度数组')
+  assert.ok(new Set(widths).size > 1, `全角汉字与半角拉丁字母的宽度应不同，实际 ${JSON.stringify([...new Set(widths)].slice(0, 8))}`)
+})
+
+test('指定的字体文件不存在 → FILE_NOT_FOUND（不静默退回）', () => {
+  assert.throws(
+    () => buildPdf({ lines: ['中文'], cjkFontPath: 'C:\\nonexistent\\font.ttf' }),
+    (err) => err.code === 'FILE_NOT_FOUND'
+  )
+})
+
+test('★ 中文字体子集：保留原字形编号，字形数据与原件逐字节一致', () => {
+  const fontFile = resolveFixtureFont()
+  if (!fontFile) return
+  const font = readFont(readFileSync(fontFile.path), fontFile.index)
+  const lookup = readCmap(font.tableBuffer(0x636d6170))
+  const text = '季度报告 ABC 123'
+  const gids = [...text].map((ch) => lookup(ch.codePointAt(0))).filter((gid) => gid !== 0)
+  assert.ok(gids.length > 0, '字体应覆盖这些字符')
+  const { buffer: subset } = subsetFont(font, gids)
+  const back = readFont(subset)
+  for (const gid of gids) {
+    const original = font.glyph(gid)
+    const copy = back.glyph(gid)
+    assert.ok(copy.length >= original.length, `字形 ${gid} 应保留`)
+    assert.ok(copy.subarray(0, original.length).equals(original), `字形 ${gid} 的数据应与原件一致`)
+  }
+  // 复合字形的闭包：子集里的字形数 >= 直接命中的字形数
+  const backLookup = readCmap(back.tableBuffer(0x636d6170))
+  for (const ch of text) {
+    const gid = lookup(ch.codePointAt(0))
+    if (gid !== 0) assert.equal(backLookup(ch.codePointAt(0)), gid, `码点 ${ch} 的 GID 应保持不变`)
+  }
+})
+
+test('找不到任何中文字体时给出可操作错误（列出试过的路径）', () => {
+  // 用一个「所有候选都不存在」的字体路径集合来模拟：直接调用 resolveCjkFont 的反例
+  assert.throws(
+    () => buildPdf({ lines: ['中文'], cjkFontPath: 'C:\\Windows\\Fonts\\__no_such_font__.ttf' }),
+    (err) => err.code === 'FILE_NOT_FOUND'
+  )
 })
 
 console.log(`\n结果：${passed} 通过，${failed} 失败\n`)

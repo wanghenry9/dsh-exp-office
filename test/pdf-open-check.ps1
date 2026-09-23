@@ -14,7 +14,10 @@ param(
   [switch]$Raw,
   # Optional ASCII keyword: report how many times Word's *independent* PDF parser sees it.
   # Used to cross-check our own full-text search hit counts (ASCII terms only).
-  [string]$Match = ''
+  [string]$Match = '',
+  # Optional path: write Word's parsed text to this file as UTF-8 (encoding-safe channel
+  # for Chinese content; stdout would be mangled by the console code page).
+  [string]$TextOut = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,6 +68,13 @@ try {
     Write-Output "HEADERFOOTER-ERROR: $($_.Exception.Message)"
   }
   $doc.Close($false)
+  # 把 Word 解析出的文本写成 UTF-8 文件：中文经 stdout 回传会被控制台编码弄坏，
+  # 写文件再让调用方按字节比对才可靠（从零生成的中文 PDF 就靠这条做独立验证）。
+  if ($TextOut -ne '') {
+    $full = [System.IO.Path]::GetFullPath($TextOut)
+    [System.IO.File]::WriteAllText($full, $text, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Output "TEXT_OUT: $full"
+  }
   if ($Raw) {
     Write-Output 'TEXT-RAW:'
     Write-Output $text

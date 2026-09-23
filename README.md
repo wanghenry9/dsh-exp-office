@@ -20,7 +20,7 @@
 
 ```bash
 # 在工作区中开发与自测
-npm test                      # 全部套件（714 项断言，约 40 秒）
+npm test                      # 全部套件（718 项断言，约 40 秒）
 npm run test:engine           # 引擎：ZIP / XML 最小修改 / 安全防护
 npm run test:xlsx             # XLSX 适配器（含样式与导出）
 npm run test:docx             # DOCX 适配器（读取 / 写入 / 校验）
@@ -32,6 +32,7 @@ npm run test:plugin           # 插件集成：注册 / 端到端 / 事务 / 任
 npm run test:scan             # XLSX 区域读取：字节扫描早停 / 上限 / 与 DOM 参照逐格等价
 npm run test:automation       # 本地联动的 Node 侧（桩脚本，不启动 Office）
 npm run verify:automation     # 本地联动真机验证（真实 Excel/WPS/Word/PowerPoint）
+
 npm run test:perf             # 性能基准（小型 + 中型）
 npm run test:perf:large       # 性能基准（追加 50 万单元格大文件；样本由生成器现造）
 npm run fixture:xlsx-large    # 造大样本（--rows/--cols/--wide/--random/--out）
@@ -130,7 +131,7 @@ npm run verify:boot           # profile 启动自检：副本漂移 + 真实 Cor
 | 本地联动 | `office_detect_engines` | 检测本机 Office/WPS 组件与版本（默认只读注册表；`probe_com=true` 会实测 COM 可用性，需授权） |
 | 本地联动 | `office_recalculate` | 用**真实引擎**重算（Excel 公式缓存 / Word 域）后另存新文件；源文件永不改动（需授权） |
 | 本地联动 | `office_rerender` | 用**真实引擎**整份重写（等价于用 Office 重新保存）后另存新文件；源文件永不改动（需授权） |
-| PDF | `office_create_pdf` | **从零生成** PDF（自写页面树/内容流/字体资源/xref，含 `/ToUnicode` 因此文本可提取）；标准 14 字体，只支持 WinAnsi 字符集 |
+| PDF | `office_create_pdf` | **从零生成** PDF（自写页面树/内容流/字体资源/xref，含 `/ToUnicode` 因此文本可提取）；拉丁文本用标准 14 字体，含中文时**自动嵌入子集化字体** |
 | PDF | `office_extract_pdf_tables` | 按文本位置推断表格（行按 y 聚类、列按 x 聚类，不依赖框线），返回二维单元格文本 |
 | 转换 | `office_convert_document` | docx/xlsx/pptx → PDF（宿主内置 LibreOffice 引擎） |
 | 任务 | `office_preview_operation` | 预览计划，返回 `plan_id` 与风险评级 |
@@ -769,19 +770,27 @@ Excel 重算后读到 **3**、WPS 重算后同样读到 **3**；Word / PowerPoin
 | 能力 | 说明 |
 |---|---|
 | 排版 | 自动折行、自动分页、`\f` 前缀强制分页；纸张 A3/A4/A5/Letter/Legal 或自定义点尺寸；纵向/横向；页边距/字号/行距/字体可调 |
-| 字体 | PDF 标准 14 字体（Helvetica / Times / Courier 各四体），**无需嵌入字体**，任何阅读器都能打开 |
-| 文本 | 括号/反斜杠/高位字符按 PDF 语法转义；`/ToUnicode` 覆盖 WinAnsi 全表 |
+| 拉丁文本 | PDF 标准 14 字体（Helvetica / Times / Courier 各四体），**无需嵌入字体**，任何阅读器都能打开 |
+| **中文等非拉丁文本** | **自动嵌入子集化的 TrueType 字体**：解析本机字体（`.ttf`/`.ttc`）→ 只保留用到的字形 → 写 Type0 / CIDFontType2 / FontDescriptor / FontFile2 / CIDToGIDMap / ToUnicode。实测含 119 个汉字的 2 页 PDF 只有 **28.7 KB** |
+| 文本 | 括号/反斜杠/高位字符按 PDF 语法转义；两类字体都写 `/ToUnicode`，因此**文本都能被提取** |
 | 元数据 | Title/Author/Subject/Keywords/Creator/Producer；非 ASCII 值按 UTF-16BE + BOM 写 |
 | 自校验 | 写完立刻用自己的读取器读回：页数不对或第一行文本读不回就**不留文件** |
 
-**诚实的边界（重要）**：
+**字体子集是怎么做的（关键设计）**：PDF 的 `CIDFontType2` 用 `/CIDToGIDMap` 把 CID 映射到字形编号，
+所以**只要子集里字形编号不变，就不需要重排编号** —— 重排编号正是子集化最容易出错的地方。
+实现是保留 `loca` 的长度、把未用到的字形写成零长度（TrueType 里的「空字形」），
+并按 maxp / hhea / hmtx 同步裁掉编号更高的部分；复合字形（带重音的拉丁字母、部分汉字）会递归闭包进来。
 
-- **只支持 WinAnsi 字符集**（拉丁字母、数字、常见标点、带重音的西欧字母）。**中日韩文字会被明确拒绝**
-  （`UNSUPPORTED_FEATURE`，并列出具体字符），因为标准 14 字体没有汉字字形，要写中文必须嵌入字体子集 ——
-  那是 `pdf.create.cjk`，当前**未实现**。
-- **中文 PDF 的正确打开方式是**：`office_create_document`（docx）+ `office_insert_paragraph` 写内容，
-  再用 `office_convert_document` 转 PDF —— 宿主内置引擎带完整中文字体，中文不会乱码。
-- 不做富文本（行内混排样式）、图片、矢量图形、表格框线与页码。
+**实测（第三方解析器独立核对）**：`npm run verify:pdf-cjk` 生成一份含中文标题、中文正文、中英混排、
+第二页与 ASCII 标记的 PDF，再用 **Word 自带的 PDF 解析器**读回来逐项比对 —— 5/5 全部读到。
+这一步不是形式：本轮就是它抓出了「`/W` 数组被当成 PDF 名称写出去」的缺陷 —— **自读完全正常，Word 读出 0 个字**。
+
+**字体从哪来**：默认按顺序找本机 `simhei.ttf` → `Deng.ttf` → `simfang.ttf` → `simkai.ttf` → `msyh.ttc` →
+`simsun.ttc` → `NotoSansSC-VF.ttf`；也可以用 `cjk_font_path` 指定。**没有任何可用字体时明确报错**
+（列出试过的路径），而不是画乱码。
+
+**仍然不做**：富文本（行内混排样式）、图片、矢量图形、表格框线与页码；
+中文**水印/叠加文字**（`pdf.overlay.cjk`）也还没做 —— 它需要把同一套字体嵌入机制接到叠加流里，属后续工作。
 
 ## 表格提取（阶段 5 收尾）
 
@@ -851,7 +860,7 @@ npm install /path/to/new-version      # 从新目录升级（会替换旧版本�
 ## 目录结构
 
 ```
-lib/                      16 个模块，无第三方运行时依赖
+lib/                      17 个模块，无第三方运行时依赖
   index.js        Cordis 插件入口：解析 defineTool 并注册工具
   capabilities.js 能力清单（插件版本/协议版本/已实现与未实现能力）
   tools.js        90 个工具定义 + 统一响应信封 + 预览-执行-回滚五件套
@@ -867,9 +876,10 @@ lib/                      16 个模块，无第三方运行时依赖
   image.js        格式无关图像能力（PNG 编码）
   convert.js      Office → PDF（延迟解析宿主内置 LibreOffice 引擎）
   automation.js   本地 Office/WPS 联动（开关 / 超时 / 进程回收 / 审计）
+
   office-automation.ps1  唯一与本地 Office/WPS 通话的脚本（固定模板、纯 ASCII、参数化）
 
-test/                     54 个文件
+test/                     56 个文件
   all.mjs               总入口（npm test）
   engine.test.mjs       引擎：ZIP / XML 最小修改 / 安全防护
   xlsx.test.mjs         XLSX 适配器
@@ -887,6 +897,7 @@ test/                     54 个文件
   automation.test.mjs   本地联动的 Node 侧（开关 / 超时 / 进程回收 / 审计，用桩脚本）
   automation-check.mjs  本地联动真机验证（真实 Excel/WPS/Word/PowerPoint，会启动本机 Office）
   make-xlsx-large-fixture.mjs 大样本生成器（直接拼 XML，不走 DOM）
+
   read-cells-check.mjs  逐格读数，用于与 Excel/WPS 读数对照
   pack-check.mjs        发布包自检（打包 → 校验清单 → 临时安装 → 真实装载）
   profile-lifecycle-check.mjs 安装 → 升级 → 卸载 演练（含源码指纹保护）

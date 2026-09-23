@@ -1960,11 +1960,14 @@ await test('★ office_create_pdf：从零生成 → 读回 → 校验 → 拒�
   assert.equal(again.success, false)
   assert.equal(again.error.code, 'PERMISSION_DENIED')
 
-  // 中文 → 明确拒绝（标准 14 字体不支持）
-  const cjk = await call('office_create_pdf', { path: 'cjk.pdf', lines: ['季度报告'] })
-  assert.equal(cjk.success, false)
-  assert.equal(cjk.error.code, 'UNSUPPORTED_FEATURE')
-  assert.equal(existsSync(join(workspace, 'cjk.pdf')), false, '被拒绝时不能留下文件')
+  // 中文 → 自动嵌入子集字体，读回文本一致
+  const cjk = await callAndValidate('office_create_pdf', { path: 'cjk.pdf', lines: ['季度报告', '中英混排 mixed 12345'] })
+  assert.equal(cjk.data.encoding, 'Identity-H（嵌入子集字体）')
+  assert.ok(cjk.data.embedded_font?.glyphs > 0, '应报告嵌入的字体子集')
+  assert.ok(cjk.warnings.some((w) => w.code === 'FONT_EMBEDDED'))
+  const cjkText = await callAndValidate('office_read_pdf', { path: 'cjk.pdf', detail: 'text' })
+  assert.ok(cjkText.data.text.includes('季度报告'))
+  assert.ok(cjkText.data.text.includes('中英混排 mixed 12345'))
 })
 
 await test('★ office_extract_pdf_tables：真实 PDF 里读出正确表格', async () => {
