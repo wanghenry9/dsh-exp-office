@@ -30,6 +30,8 @@ npm run test:fidelity         # 保真度：真实 Excel 多特性样本
 npm run test:word-fidelity    # 保真度：真实 Word 复杂样本（批注/修订/目录）
 npm run test:plugin           # 插件集成：注册 / 端到端 / 事务 / 任务五件套
 npm run test:scan             # XLSX 区域读取：字节扫描早停 / 上限 / 与 DOM 参照逐格等价
+npm run test:automation       # 本地联动的 Node 侧（桩脚本，不启动 Office）
+npm run verify:automation     # 本地联动真机验证（真实 Excel/WPS/Word/PowerPoint）
 npm run test:perf             # 性能基准（小型 + 中型）
 npm run test:perf:large       # 性能基准（追加 50 万单元格大文件；样本由生成器现造）
 npm run fixture:xlsx-large    # 造大样本（--rows/--cols/--wide/--random/--out）
@@ -125,6 +127,9 @@ npm run verify:boot           # profile 启动自检：副本漂移 + 真实 Cor
 | 校验 | `office_validate_workbook` | 结构/关系/公式/宏/图表校验，可与基线比对 |
 | 校验 | `office_validate_docx` | Word 结构校验；明确列出未检查项与字体清单 |
 | 校验 | `office_compare_docx` | 两份 Word 的段落级差异（新增/删除/修改 + 文字 vs 样式）、表格逐格变化、样式集合与元数据差异；只读，不写修订标记 |
+| 本地联动 | `office_detect_engines` | 检测本机 Office/WPS 组件与版本（默认只读注册表；`probe_com=true` 会实测 COM 可用性，需授权） |
+| 本地联动 | `office_recalculate` | 用**真实引擎**重算（Excel 公式缓存 / Word 域）后另存新文件；源文件永不改动（需授权） |
+| 本地联动 | `office_rerender` | 用**真实引擎**整份重写（等价于用 Office 重新保存）后另存新文件；源文件永不改动（需授权） |
 | 转换 | `office_convert_document` | docx/xlsx/pptx → PDF（宿主内置 LibreOffice 引擎） |
 | 任务 | `office_preview_operation` | 预览计划，返回 `plan_id` 与风险评级 |
 | 任务 | `office_execute_operation` | 执行计划（自动备份 + 校验） |
@@ -710,8 +715,9 @@ WPS 演示（`npm run verify:pptx-slide-ops-wps`）把它识别为 `type=17`、�
 - **不执行宏**：`.xlsm` 的 VBA 按原字节保留但从不执行。
 - **CSV 导出是有损的**：公式、样式、图表、批注与其它工作表都不会保留，会返回 `LOSSY_CONVERT` 警告。
 - **样式能力限于字体/填充/数字格式/水平对齐**，不支持边框、垂直对齐、条件格式创建。
-- **不支持**：图表创建、透视表修改、Office/WPS 本地自动化联动（阶段 6）、PDF 表单填写/批注/合并拆分、水印的**中文**文字、OCR、PDF → Office 反向转换（阶段 5–7 计划）。
+- **不支持**：图表创建、透视表修改、PDF 表单填写/批注/合并拆分、水印的**中文**文字、OCR、PDF → Office 反向转换（阶段 5–7 计划）。
 - **`<c><v/></c>`（空值元素）读出来是 `0` 而不是 `null`**：`Number('')` 的历史行为，改造前后一致；要改成 `null` 属于语义变更，需要单独决策（已记在任务清单）。
+- **本地引擎联动是「单用户桌面」级别**：默认关闭、只清理自己启动的进程、不做受限账户/沙箱隔离（开发要求建议的隔离需要运维层面配合）；视觉是否变化也没有回归测试（需要渲染成图片才能判定）。
 - **页码/日期等域不写死数字**：域的值由 Word 计算，插件写入的是域代码与一个缓存值；请按 F9（或打印预览）刷新。WPS 文字能正常打开带域文档，但 WPS COM 的 `Fields.Count` **只统计正文域**，页眉页脚里的域不出现在该集合中 —— 那里读到 0 不代表域没写进去（Word 的 `Section.Headers/Footers.Range.Fields` 读到 1，类型 33 即 `wdFieldPage`）。
 - **PDF 写入限于页面级操作与叠加文字**（旋转/删除/重排、水印、页码）：不做**原地改写已有文字**、表单填写与内容流重写；要安全地做到那些需要解析并重建内容流与字体子集，不是这一阶段能诚实交付的。
 - **加密文件**：正确识别并返回 `PASSWORD_REQUIRED`，不解密。
@@ -721,7 +727,37 @@ WPS 演示（`npm run verify:pptx-slide-ops-wps`）把它识别为 `type=17`、�
 - Node.js ≥ 22.19.0（依赖内置 `zlib.crc32` 与 `node:crypto`）
 - DSH ≥ 0.1.0-rc.6
 - 无第三方运行时依赖，无网络访问需求
-- 插件配置：`workspaceRoot`（默认进程工作目录）、`maxFileBytes`、`allowOverwriteOriginals`
+- 插件配置：`workspaceRoot`（默认进程工作目录）、`maxFileBytes`、`allowOverwriteOriginals`、`maxEditableCells`、`allowLocalAutomation`（默认 false）、`automationTimeoutMs`、`powershellPath`
+
+## 本地 Office/WPS 联动（阶段 6）
+
+三个工具，**默认全部关闭**（`allowLocalAutomation` 必须显式为 `true`）：
+
+| 工具 | 做什么 | 会不会动源文件 |
+|---|---|---|
+| `office_detect_engines` | 读注册表列出本机 Office/WPS 组件与版本；`probe_com=true` 时实测 COM 可用性（需授权） | 不动任何文件 |
+| `office_recalculate` | 用真实引擎打开**副本**、重算（Excel 公式缓存、Word 域）后另存为新文件 | **不会**：输入只读打开，产物写新路径 |
+| `office_rerender` | 用真实引擎打开**副本**并整份重写后另存为新文件（修「Office 能打开但提示修复」的文件） | **不会** |
+
+**安全契约**（开发要求 §十二.4 逐条落地，另有 [docs/本地联动安全说明.md](docs/本地联动安全说明.md)）：
+
+| 要求 | 做法 |
+|---|---|
+| 独立进程 | 引擎在它自己的进程里跑；插件只通过结果 JSON 读结论，不把 COM 对象暴露给上层 |
+| 禁止宏自动执行 | `AutomationSecurity = 3`（msoAutomationSecurityForceDisable）；宏文件按宏格式重存但**绝不执行宏** |
+| 禁止外部链接/模板自动更新 | `AskToUpdateLinks = false`、`Open(UpdateLinks:=0)`；不调用 `AddIns`/`AttachedTemplate` |
+| 设置脚本执行超时 | 默认 120 s；到点先杀 PowerShell 进程树，再按状态文件补一次 cleanup |
+| 防止弹窗阻塞 | `DisplayAlerts = false`、`-NonInteractive`、尽量隐藏窗口 |
+| 检测进程异常退出 | 脚本结束返回退出码与 JSON；插件按「结果文件是否存在」判定，绝不当成功 |
+| 任务结束清理进程 | 开始时快照引擎 PID，结束时**只杀新增的那些**（不碰用户自己开着的 Office/WPS），并回报 `killed_pids` / `leftover_pids` |
+| 文件锁 | 调用期间对源文件加插件自己的文件锁，避免与其它任务同时处理同一文件 |
+| 审计 | 每次调用追加一行 JSONL（动作/引擎/文件名/字节数/耗时/错误），**不记绝对路径、不记文档内容** |
+
+真机验证（`npm run verify:automation`，本机 Office 16.0.17932 + WPS 12.1）：故意把 `=1+2` 的缓存值写成 999 →
+Excel 重算后读到 **3**、WPS 重算后同样读到 **3**；Word / PowerPoint 重写后的产物都能被自身读取器解析且规模一致；
+每一次都断言**源文件逐字节未变**、**没有留下本次启动的引擎进程**。
+
+> 明确没做的：受限账户/沙箱隔离（需要运维层面配合）、视觉回归（要渲染成图片）、把 COM 对象直接暴露给 Agent（开发要求明令禁止）。
 
 ## 并发与文件锁
 
@@ -765,21 +801,23 @@ npm install /path/to/new-version      # 从新目录升级（会替换旧版本�
 ## 目录结构
 
 ```
-lib/                      13 个模块，无第三方运行时依赖
+lib/                      15 个模块，无第三方运行时依赖
   index.js        Cordis 插件入口：解析 defineTool 并注册工具
   capabilities.js 能力清单（插件版本/协议版本/已实现与未实现能力）
-  tools.js        85 个工具定义 + 统一响应信封 + 预览-执行-回滚五件套
+  tools.js        88 个工具定义 + 统一响应信封 + 预览-执行-回滚五件套
   ooxml.js        格式无关底座：ZIP 容器、字节级最小修改 XML 引擎、OPC 容器操作
   workspace.js    路径安全 / 真实类型检测 / 哈希 / 文件锁 / 临时目录 / 事务回滚
   errors.js       错误码体系 + 结构化响应
   define-tool.js  defineTool 与宿主模块的分层解析
   xlsx.js         XLSX 适配器（读写/工作表/查找替换/合并/行列/样式/导出/校验）
-  docx.js         DOCX 适配器（读写/段落/表格/页眉页脚/图片/保护性检查/校验）
+  docx.js         DOCX 适配器（读写/段落/表格/页眉页脚/图片/文档比较/保护性检查/校验）
   pptx.js         PPTX 适配器（读取/形状文本/幻灯片增删排序/图片表格/图表/版式主题/校验）
   pptx-template.js 空白演示文稿模板生成器（主题/母版/版式程序化生成）
   pdf.js          PDF 适配器（读取/文本/页面操作/叠加写入/重写·拆分·合并/图片提取）
   image.js        格式无关图像能力（PNG 编码）
   convert.js      Office → PDF（延迟解析宿主内置 LibreOffice 引擎）
+  automation.js   本地 Office/WPS 联动（开关 / 超时 / 进程回收 / 审计）
+  office-automation.ps1  唯一与本地 Office/WPS 通话的脚本（固定模板、纯 ASCII、参数化）
 
 test/                     52 个文件
   all.mjs               总入口（npm test）
@@ -796,6 +834,8 @@ test/                     52 个文件
   convert.test.mjs      转 PDF（真实引擎，单独套件）
   perf.test.mjs         性能基准（对照文档 §14.4 目标）
   concurrency.test.mjs  并发与文件锁（串行化 / FILE_LOCKED / 残留锁回收）
+  automation.test.mjs   本地联动的 Node 侧（开关 / 超时 / 进程回收 / 审计，用桩脚本）
+  automation-check.mjs  本地联动真机验证（真实 Excel/WPS/Word/PowerPoint，会启动本机 Office）
   make-xlsx-large-fixture.mjs 大样本生成器（直接拼 XML，不走 DOM）
   read-cells-check.mjs  逐格读数，用于与 Excel/WPS 读数对照
   pack-check.mjs        发布包自检（打包 → 校验清单 → 临时安装 → 真实装载）

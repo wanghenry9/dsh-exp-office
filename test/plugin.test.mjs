@@ -1930,6 +1930,31 @@ await test('★ office_compare_docx：段落/表格/样式差异端到端（只�
   assert.equal(wrong.error.code, 'UNSUPPORTED_FILE_TYPE')
 })
 
+await test('★ 本地引擎联动：默认关闭时拒绝启动，只读检测仍然可用', async () => {
+  // 1) 只读注册表检测：不需要授权，也不启动任何程序
+  const detect = await callAndValidate('office_detect_engines', {})
+  assert.equal(Array.isArray(detect.data.engines), true)
+  assert.equal(detect.data.local_automation_enabled, false, '测试配置里没开本地联动')
+  assert.equal(typeof detect.data.microsoft_office, 'boolean')
+  assert.equal(typeof detect.data.wps, 'boolean')
+
+  // 2) 真的驱动引擎：默认配置必须拒绝，并说清怎么开
+  const recalc = await call('office_recalculate', { path: 'demo.xlsx' })
+  assert.equal(recalc.success, false)
+  assert.equal(recalc.error.code, 'AUTOMATION_DISABLED')
+  assert.match(recalc.error.message, /allowLocalAutomation/)
+
+  // 3) 探 COM 也需要授权
+  const probe = await call('office_detect_engines', { probe_com: true })
+  assert.equal(probe.success, false)
+  assert.equal(probe.error.code, 'AUTOMATION_DISABLED')
+
+  // 4) 非 OOXML 类型明确拒绝（不等到启动引擎才发现）
+  const wrong = await call('office_rerender', { path: 'sample.pdf' })
+  assert.equal(wrong.success, false)
+  assert.equal(wrong.error.code, 'UNSUPPORTED_FILE_TYPE')
+})
+
 await test('★ office_set_theme + read_pptx(detail=layouts) 端到端', async () => {
   if (!hasDeck) return
   copyFileSync(deckSource, join(workspace, 'deck-theme.pptx'))

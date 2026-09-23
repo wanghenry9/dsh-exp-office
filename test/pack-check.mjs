@@ -24,7 +24,26 @@ const keep = process.argv.includes('--keep')
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-office-pack-'))
 
 const run = (cmd, args, options = {}) =>
-  execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options })
+  execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: npmEnv(), ...options })
+
+/**
+ * 给嵌套的 npm 一份干净的 npm 配置环境。
+ *
+ * 为什么需要：`npm run verify:pack` 时外层 npm 会把 `npm_config_*` 注入子进程，
+ * 嵌套的 `npm install` 会继承这些配置 —— 实测表现为**直接跑 `node test/pack-check.mjs`
+ * 通过、用 `npm run verify:pack` 却报 `EALLOWSCRIPTS`**（同一个脚本、同一个 tarball）。
+ * 这里显式剔除继承来的 `npm_config_*`，让检查只取决于代码本身，而不是外层 npm 的配置。
+ *
+ * @returns {NodeJS.ProcessEnv} 子进程环境变量。
+ */
+function npmEnv() {
+  const env = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.toLowerCase().startsWith('npm_config_')) continue
+    env[key] = value
+  }
+  return env
+}
 
 /**
  * 调 npm 的稳妥方式：直接让当前 node 跑 npm 的 JS 入口。
@@ -78,7 +97,11 @@ for (const pattern of ['.dsh-release/', 'node_modules/', 'test/', '任务清单.
 // 3) 临时安装
 try {
   fs.writeFileSync(path.join(workDir, 'package.json'), JSON.stringify({ name: 'pack-smoke', private: true, version: '0.0.0' }, null, 2))
-  runNpm(['install', '--no-audit', '--no-fund', packed.file], { cwd: workDir })
+  // --omit=peer：peerDependencies（cordis / dsh-tools / libreoffice-kit）由宿主提供，
+  //   装进临时目录既没必要也会把检查变成网络依赖。
+  // --ignore-scripts：插件的检查不该运行任何第三方安装脚本（npm 新版本在非交互下
+  //   遇到带安装脚本的包会直接报 EALLOWSCRIPTS，正是这个开关挡住的）。
+  runNpm(['install', '--no-audit', '--no-fund', '--ignore-scripts', '--omit=peer', packed.file], { cwd: workDir })
   const installedDir = path.join(workDir, 'node_modules', 'dsh-exp-office')
   if (!fs.existsSync(path.join(installedDir, 'lib', 'index.js'))) problems.push('安装后找不到 lib/index.js')
   const installedModules = fs.existsSync(path.join(installedDir, 'node_modules')) ? fs.readdirSync(path.join(installedDir, 'node_modules')) : []

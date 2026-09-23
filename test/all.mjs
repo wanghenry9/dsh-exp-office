@@ -19,7 +19,8 @@ const SUITES = [
   ['保真度：真实 Word 复杂样本（批注/修订/目录）', 'word-fidelity.test.mjs'],
   ['宏启用工作簿（检测与字节保留）', 'macro.test.mjs'],
   ['插件集成：注册 / 端到端 / 事务 / 任务五件套', 'plugin.test.mjs'],
-  ['并发与文件锁', 'concurrency.test.mjs']
+  ['并发与文件锁', 'concurrency.test.mjs'],
+  ['本地 Office/WPS 联动（Node 侧，桩脚本）', 'automation.test.mjs']
 ]
 
 let failedSuites = 0
