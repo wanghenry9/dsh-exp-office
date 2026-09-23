@@ -1,0 +1,41 @@
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+coverage/
+*.tgz
+
+# 运行期临时产物（插件自己在工作区生成的暂存/输出目录）
+.dsh-exp-office/
+tmp-*/
+*.tmp
+*.lock
+staging-*
+
+# 发布流程运行目录与凭据文件（绝不入库）
+.dsh-release/
+.secrets/
+secrets/
+github.env
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.git-secrets.local
+.privacy-patterns.local
+
+# 你自己的需求原文（不发布，本地保留）
+dsh-exp-office开发要求.txt
+
+# 日志（可能夹带密钥与用户数据）
+*.log
+logs/
+
+# 编辑器与系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.swp

@@ -1,0 +1,129 @@
+{
+  "name": "dsh-exp-office",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness 办公插件：XLSX / DOCX / PPTX / PDF 的创建、读取、编辑、校验与导出，零运行时依赖，最小修改模式保证文档保真",
+  "private": false,
+  "type": "module",
+  "engines": {
+    "dsh": ">=0.1.0-rc.6",
+    "node": ">=22.19.0"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "dsh.plugin.json",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/all.mjs",
+    "test:engine": "node test/engine.test.mjs",
+    "test:xlsx": "node test/xlsx.test.mjs",
+    "test:docx": "node test/docx.test.mjs",
+    "test:fidelity": "node test/fidelity.test.mjs",
+    "test:plugin": "node test/plugin.test.mjs",
+    "test:concurrency": "node test/concurrency.test.mjs",
+    "verify:lifecycle": "node test/profile-lifecycle-check.mjs",
+    "verify:pack": "node test/pack-check.mjs",
+    "verify:privacy": "node test/release-privacy-check.mjs",
+    "test:perf": "node test/perf.test.mjs",
+    "test:perf:large": "node test/perf.test.mjs --large",
+    "fixture:excel": "pwsh -File test/make-excel-fixture.ps1",
+    "verify:excel": "pwsh -File test/office-open-check.ps1 -Path test/fixtures/excel-rich-modified.xlsx",
+    "verify:wps": "pwsh -File test/wps-open-check.ps1 -Path test/fixtures/excel-rich-modified.xlsx",
+    "verify:word": "pwsh -File test/word-open-check.ps1 -Path test/fixtures/report-edited.docx",
+    "test:convert": "node test/convert.test.mjs",
+    "test:word-fidelity": "node test/word-fidelity.test.mjs",
+    "fixture:word": "pwsh -File test/make-word-complex-fixture.ps1",
+    "fixture:image": "node test/make-image-fixture.mjs",
+    "test:pptx": "node test/pptx.test.mjs",
+    "fixture:pptx": "pwsh -File test/make-pptx-fixture.ps1",
+    "test:macro": "node test/macro.test.mjs",
+    "fixture:macro": "node test/make-macro-fixture.mjs",
+    "verify:pptx": "pwsh -File test/pptx-open-check.ps1 -Path test/fixtures/deck-edited.pptx -Slide 2 -Shape 2",
+    "verify:pptx-managed": "pwsh -File test/pptx-open-check.ps1 -Path test/fixtures/deck-managed.pptx -Slide 1 -Shape 1",
+    "verify:pptx-image": "pwsh -File test/pptx-open-check.ps1 -Path test/fixtures/deck-image.pptx -Slide 2 -Shape 3",
+    "fixture:pptx-slide-ops": "node test/make-pptx-slide-ops-fixture.mjs",
+    "verify:pptx-slide-ops": "pwsh -File test/pptx-open-check.ps1 -Path test/fixtures/deck-slide-ops.pptx -Slide 3 -Shape 3",
+    "fixture:pptx-charts": "node test/make-pptx-chart-fixture.mjs",
+    "verify:pptx-charts": "pwsh -File test/pptx-open-check.ps1 -Path test/fixtures/deck-charts.pptx -Slide 5 -Shape 1",
+    "fixture:pptx-layout": "node test/make-pptx-layout-fixture.mjs",
+    "verify:pptx-layout": "pwsh -File test/pptx-open-check.ps1 -Path test/fixtures/deck-layout.pptx -Slide 1 -Shape 1",
+    "verify:pptx-slide-ops-wps": "pwsh -File test/wps-office-check.ps1 -Path test/fixtures/deck-slide-ops.pptx -Kind presentation",
+    "fixture:docx-export": "node test/make-docx-export-fixture.mjs",
+    "verify:docx-export": "pwsh -File test/word-open-check.ps1 -Path test/fixtures/report-exported.docx",
+    "fixture:pptx-created": "node test/make-pptx-created-fixture.mjs",
+    "verify:pptx-created": "pwsh -File test/pptx-open-check.ps1 -Path test/fixtures/created-deck.pptx -Slide 1 -Shape 1",
+    "verify:pptx-created-edited": "pwsh -File test/pptx-open-check.ps1 -Path test/fixtures/created-deck-edited.pptx -Slide 2 -Shape 1",
+    "verify:pptx-created-wps": "pwsh -File test/wps-office-check.ps1 -Path test/fixtures/created-deck-edited.pptx -Kind presentation",
+    "fixture:pptx-theme": "node test/make-pptx-theme-fixture.mjs",
+    "verify:pptx-theme": "pwsh -File test/pptx-open-check.ps1 -Path test/fixtures/deck-theme.pptx -Slide 1 -Shape 1",
+    "fixture:docx-layout": "node test/make-docx-layout-fixture.mjs",
+    "fixture:docx-bookmark": "node test/make-docx-bookmark-fixture.mjs",
+    "verify:docx-bookmark": "pwsh -File test/word-open-check.ps1 -Path test/fixtures/report-bookmarks.docx",
+    "fixture:docx-wrap": "node test/make-docx-wrap-fixture.mjs",
+    "verify:docx-wrap": "pwsh -File test/word-open-check.ps1 -Path test/fixtures/report-image-wrapped.docx",
+    "verify:docx-layout": "pwsh -File test/word-open-check.ps1 -Path test/fixtures/report-layout.docx",
+    "verify:docx-layout-wps": "pwsh -File test/wps-office-check.ps1 -Path test/fixtures/report-layout.docx -Kind writer",
+    "test:pdf": "node test/pdf.test.mjs",
+    "fixture:pdf": "node test/make-pdf-fixture.mjs",
+    "fixture:pdf-annotation": "node test/make-pdf-annotation-fixture.mjs",
+    "fixture:pdf-form": "node test/make-pdf-form-fixture.mjs",
+    "verify:pdf-form": "pwsh -File test/pdf-open-check.ps1 -Path test/fixtures/form-filled.pdf",
+    "verify:pdf-annotation": "pwsh -File test/pdf-open-check.ps1 -Path test/fixtures/sample-annotated.pdf",
+    "verify:pdf": "pwsh -File test/pdf-open-check.ps1 -Path test/fixtures/sample-multipage.pdf",
+    "verify:boot": "node test/profile-boot-check.mjs",
+    "fixture:table": "node test/make-table-fixture.mjs",
+    "verify:table": "pwsh -File test/office-open-check.ps1 -Path test/fixtures/sales-table.xlsx",
+    "fixture:chart": "node test/make-chart-fixture.mjs",
+    "verify:chart": "pwsh -File test/office-open-check.ps1 -Path test/fixtures/sales-chart.xlsx",
+    "verify:docx-table": "pwsh -File test/word-open-check.ps1 -Path test/fixtures/report-table-ops.docx",
+    "fixture:docx-table": "node test/make-docx-table-fixture.mjs",
+    "verify:docx-table-build": "pwsh -File test/word-open-check.ps1 -Path test/fixtures/report-tables-built.docx",
+    "fixture:docx-image": "node test/make-docx-image-fixture.mjs",
+    "verify:docx-image": "pwsh -File test/word-open-check.ps1 -Path test/fixtures/report-image-resized.docx",
+    "verify:docx-image-delete": "pwsh -File test/word-open-check.ps1 -Path test/fixtures/report-image-deleted.docx",
+    "fixture:docx-style": "node test/make-docx-style-fixture.mjs",
+    "verify:docx-style": "pwsh -File test/word-open-check.ps1 -Path test/fixtures/report-styled.docx",
+    "sync:profile": "node test/sync-to-profile.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "office",
+    "wps",
+    "xlsx",
+    "docx",
+    "pptx",
+    "pdf",
+    "ooxml"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6",
+    "@deepseek-ai/libreoffice-kit": ">=0.0.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.1.5-rc.1": "compatible",
+        "0.1.5-rc.2": "compatible",
+        "0.1.6-alpha.2": "compatible"
+      }
+    }
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/libreoffice-kit": {
+      "optional": true
+    }
+  }
+}
