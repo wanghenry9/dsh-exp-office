@@ -1487,5 +1487,123 @@ test('★ 读取批注/修订不产生补丁（部件级逐字节一致）', () 
   assert.deepEqual(after.names().sort(), before.names().sort(), '不应新增或删除部件')
 })
 
+console.log('\n=== 24. 文档比较（段落级差异）===')
+
+/**
+ * 造一对「已知差异」的文档：在基准文档上做可数的改动。
+ * @returns {{a: Buffer, b: Buffer}} 旧文档与新文档字节。
+ */
+function makeDiffPair() {
+  const a = buildBasicDocx({ title: '季度销售报告' })
+  const doc = DocxDocument.open(a)
+  // 基准文档的段落：[标题][正文(含加粗)][正文结束。]，其后是表格
+  doc.insertParagraph({ after: 2, text: '这是新增的一段。' })
+  doc.updateParagraph({ index: 1, text: '本文件由 dsh-exp-office 生成（文字已改）。' })
+  const endIndex = doc.paragraphs().paragraphs.findIndex((p) => p.text === '正文结束。')
+  doc.setParagraphStyle({ index: endIndex, styleId: 'Heading2' })
+  doc.updateTableCell({ table: 0, row: 1, column: 1, text: '一月' })
+  const b = doc.save()
+  return { a, b }
+}
+
+const pair = makeDiffPair()
+
+test('内容完全相同 → identical，且各类差异均为 0', () => {
+  const diff = DocxDocument.open(original).compare(DocxDocument.open(original))
+  assert.equal(diff.identical, true)
+  assert.equal(diff.paragraphs.total_added, 0)
+  assert.equal(diff.paragraphs.total_removed, 0)
+  assert.equal(diff.paragraphs.total_changed, 0)
+  assert.equal(diff.tables.total_changed, 0)
+  assert.deepEqual(diff.styles, { added: [], removed: [] })
+  assert.deepEqual(diff.metadata.changed, [])
+})
+
+test('★ 新增段落只算新增，不会把后面的段落全报成修改（LCS 对齐）', () => {
+  const diff = DocxDocument.open(pair.a).compare(DocxDocument.open(pair.b))
+  const addedTexts = diff.paragraphs.added.map((p) => p.text)
+  assert.ok(addedTexts.includes('这是新增的一段。'), `新增段落应被识别：${JSON.stringify(addedTexts)}`)
+  assert.equal(diff.paragraphs.total_removed, 0, `不应产生删除：${JSON.stringify(diff.paragraphs.removed)}`)
+  // 未改动的段落不能被报成修改
+  const changedTexts = diff.paragraphs.changed.map((c) => c.text_before)
+  assert.equal(changedTexts.includes('季度销售报告'), false, '未改动的段落不应出现在修改里')
+})
+
+test('★ 改文字被标为 text，改样式被标为 style', () => {
+  const diff = DocxDocument.open(pair.a).compare(DocxDocument.open(pair.b))
+  const textChange = diff.paragraphs.changed.find((c) => c.kind === 'text')
+  assert.ok(textChange, '应有一处纯文字修改')
+  assert.equal(textChange.text_after, '本文件由 dsh-exp-office 生成（文字已改）。')
+  assert.equal(textChange.style_before, textChange.style_after)
+  const styleChange = diff.paragraphs.changed.find((c) => c.kind === 'style')
+  assert.ok(styleChange, '应有一处纯样式修改')
+  assert.equal(styleChange.text_before, styleChange.text_after)
+  assert.equal(styleChange.style_after, 'Heading2')
+})
+
+test('表格逐格变化被定位到行列', () => {
+  const diff = DocxDocument.open(pair.a).compare(DocxDocument.open(pair.b))
+  const cell = diff.tables.changed.find((c) => c.kind === 'cell')
+  assert.ok(cell, `应有单元格变化：${JSON.stringify(diff.tables.changed)}`)
+  assert.equal(cell.table, 0)
+  assert.equal(cell.row, 2)
+  assert.equal(cell.column, 2)
+  assert.equal(cell.after, '一月')
+})
+
+test('样式集合差异与元数据差异各归各类', () => {
+  const diff = DocxDocument.open(pair.a).compare(DocxDocument.open(pair.b))
+  assert.ok(diff.styles.added.includes('Heading2'), `样式新增应含 Heading2：${JSON.stringify(diff.styles)}`)
+  assert.deepEqual(diff.styles.removed, [])
+  const b = DocxDocument.open(pair.b)
+  b.updateParagraph({ index: 0, text: '标题 1' })
+  assert.equal(diff.metadata.changed.length, 0, '样本元数据未改，不应报差异')
+})
+
+test('★ 比较是只读的：两份文件的部件一个字节都不变', () => {
+  const bytesA = Buffer.from(pair.a)
+  const bytesB = Buffer.from(pair.b)
+  DocxDocument.open(bytesA).compare(DocxDocument.open(bytesB))
+  assert.ok(bytesA.equals(pair.a), 'path_a 的字节不应被改动')
+  assert.ok(bytesB.equals(pair.b), 'path_b 的字节不应被改动')
+})
+
+test('max_items 截断时 total_* 仍是真实总数，并给出警告', () => {
+  const a = buildBasicDocx({ title: '基准' })
+  const doc = DocxDocument.open(a)
+  for (let i = 0; i < 12; i += 1) doc.insertParagraph({ after: 0, text: `新增段 ${i}` })
+  const diff = DocxDocument.open(a).compare(DocxDocument.open(doc.save()), { maxItems: 5 })
+  assert.equal(diff.truncated, true)
+  assert.equal(diff.paragraphs.added.length, 5)
+  assert.equal(diff.paragraphs.total_added, 12)
+  assert.ok(diff.warnings.some((w) => w.code === 'COMPARE_TRUNCATED'))
+})
+
+test('段落过多时退化为按位置配对，并明确告知（不假装精确）', () => {
+  const a = buildBasicDocx({ title: '基准' })
+  const doc = DocxDocument.open(a)
+  doc.insertParagraph({ after: 0, text: '中间插入的一段' })
+  const diff = DocxDocument.open(a).compare(DocxDocument.open(doc.save()), { maxCells: 4 })
+  assert.ok(diff.warnings.some((w) => w.code === 'COMPARE_ALIGNMENT_FALLBACK'), `应给出退化警告：${JSON.stringify(diff.warnings)}`)
+})
+
+test('可以关掉表格/样式/元数据比较', () => {
+  const diff = DocxDocument.open(pair.a).compare(DocxDocument.open(pair.b), {
+    includeTables: false,
+    includeStyles: false,
+    includeMetadata: false
+  })
+  assert.equal(diff.tables.total_changed, 0)
+  assert.deepEqual(diff.styles, { added: [], removed: [] })
+  assert.deepEqual(diff.metadata.changed, [])
+})
+
+test('参数校验：不是文档对象时明确拒绝', () => {
+  assert.throws(
+    () => DocxDocument.open(original).compare(null),
+    (e) => e.code === 'INVALID_REQUEST'
+  )
+})
+
 console.log(`\n结果：${passed} 通过，${failed} 失败\n`)
 process.exit(failed === 0 ? 0 : 1)

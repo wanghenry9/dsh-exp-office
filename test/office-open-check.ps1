@@ -3,7 +3,10 @@
 param(
   [Parameter(Mandatory = $true)][string]$Path,
   [string]$ExpectA2 = '',
-  [string]$ExpectB2 = ''
+  [string]$ExpectB2 = '',
+  [string]$Cells = '',
+  [string]$FormulaRef = 'D2',
+  [switch]$SkipUsedRange
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,8 +34,16 @@ try {
   Write-Output "A1: $($ws1.Range('A1').Text)"
   Write-Output "A2: $($ws1.Range('A2').Text)"
   Write-Output "B2: $($ws1.Range('B2').Text)"
-  Write-Output "D2_FORMULA: $($ws1.Range('D2').Formula)"
-  Write-Output "USEDRANGE: $($ws1.UsedRange.Address($false, $false))"
+  Write-Output "D2_FORMULA: $($ws1.Range($FormulaRef).Formula)"
+  if (-not $SkipUsedRange) {
+    Write-Output "USEDRANGE: $($ws1.UsedRange.Address($false, $false))"
+  }
+
+  # 指定单元格读数：用于「插件读到的值」与「Excel 读到的值」逐格对照（逗号分隔）。
+  foreach ($ref in ($Cells -split ',' | Where-Object { $_ -ne '' })) {
+    $value = $ws1.Range($ref).Text
+    Write-Output "CELL_${ref}: $value"
+  }
 
   # 表格对象（ListObject）：插件建的表格必须被 Excel 认出来，否则文件会被要求修复
   foreach ($sheet in $wb.Worksheets) {

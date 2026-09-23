@@ -20,7 +20,7 @@
 
 ```bash
 # 在工作区中开发与自测
-npm test                      # 全部套件（633 项断言，约 15 秒）
+npm test                      # 全部套件（682 项断言，约 17 秒）
 npm run test:engine           # 引擎：ZIP / XML 最小修改 / 安全防护
 npm run test:xlsx             # XLSX 适配器（含样式与导出）
 npm run test:docx             # DOCX 适配器（读取 / 写入 / 校验）
@@ -29,8 +29,11 @@ npm run test:pdf              # PDF 适配器（读取 / 文本提取 / 页面�
 npm run test:fidelity         # 保真度：真实 Excel 多特性样本
 npm run test:word-fidelity    # 保真度：真实 Word 复杂样本（批注/修订/目录）
 npm run test:plugin           # 插件集成：注册 / 端到端 / 事务 / 任务五件套
+npm run test:scan             # XLSX 区域读取：字节扫描早停 / 上限 / 与 DOM 参照逐格等价
 npm run test:perf             # 性能基准（小型 + 中型）
-npm run test:perf:large       # 性能基准（追加 50MB 级场景）
+npm run test:perf:large       # 性能基准（追加 50 万单元格大文件；样本由生成器现造）
+npm run fixture:xlsx-large    # 造大样本（--rows/--cols/--wide/--random/--out）
+npm run verify:xlsx-large     # 真实 Excel 打开大样本（配合 test/read-cells-check.mjs 逐格对照）
 npm run verify:boot           # profile 启动自检：副本漂移 + 真实 Cordis 装载（不开服务）
 ```
 
@@ -42,7 +45,7 @@ npm run verify:boot           # profile 启动自检：副本漂移 + 真实 Cor
       name: 'dsh-exp-office'
 ```
 
-## 工具清单（84 个）
+## 工具清单（85 个）
 
 | 分类 | 工具 | 说明 |
 |---|---|---|
@@ -121,6 +124,7 @@ npm run verify:boot           # profile 启动自检：副本漂移 + 真实 Cor
 | PDF | `office_extract_pdf_images` | 提取页面图片（JPEG/JP2 原样导出，Flate 流还原预测器后包成 PNG） |
 | 校验 | `office_validate_workbook` | 结构/关系/公式/宏/图表校验，可与基线比对 |
 | 校验 | `office_validate_docx` | Word 结构校验；明确列出未检查项与字体清单 |
+| 校验 | `office_compare_docx` | 两份 Word 的段落级差异（新增/删除/修改 + 文字 vs 样式）、表格逐格变化、样式集合与元数据差异；只读，不写修订标记 |
 | 转换 | `office_convert_document` | docx/xlsx/pptx → PDF（宿主内置 LibreOffice 引擎） |
 | 任务 | `office_preview_operation` | 预览计划，返回 `plan_id` 与风险评级 |
 | 任务 | `office_execute_operation` | 执行计划（自动备份 + 校验） |
@@ -589,6 +593,18 @@ WPS 演示（`npm run verify:pptx-slide-ops-wps`）把它识别为 `type=17`、�
 
 > **不假装通过**：空白页、元素重叠、表格越界、页眉页脚重叠、字体替换这五项必须渲染成图片才能判定，工具会在 `not_checked` 中如实列出并给出原因，而不是返回一个「全部通过」。这个校验器第一次运行就抓出了我自己样本里引用未定义 `TableGrid` 样式的真实缺陷。
 
+**比较** —— `office_compare_docx`：两份 Word 的**段落级差异**（只读，不改文件、不写修订标记）。
+
+- 一级对齐用最长公共子序列，键是「样式 + 文字」：中间插入一段不会把后面所有段落都报成「修改」；
+- 二级对齐在「删+增」区块内按相似度（文字相似度 ×2 + 样式相同 ×1）做保序最大权匹配，因此能区分
+  「这段文字被改了」「这段只是换了样式」「这里真的插入了一段新内容」——直接按位置配对会把新插入的段落说成旧段落被改；
+- 表格：表格个数、行列数变化、逐格文本变化（定位到第几张表第几行第几列）；另外比对段落样式集合与元数据字段；
+- 段落数超过精确对齐的计算上限时**退化为按位置配对并明确告知**（`COMPARE_ALIGNMENT_FALLBACK`），不假装精确；
+- 条目超过 `max_items` 时截断，但 `total_*` 仍是真实总数。
+
+> 实测（真实 Word 交叉验证）：`report.docx`（Word 读到 9 段）与 `report-edited.docx`（Word 读到 10 段、第 2 段是「本段由插件插入」）→
+> 插件比较结果恰好是「新增 1 段『本段由插件插入』+ 1 处正文文字修改」，与 Word 自己的说法一致。
+
 ## 转 PDF
 
 `office_convert_document` 把 `docx` / `xlsx` / `pptx`（含旧版二进制格式）转为 PDF，使用**宿主内置的 LibreOffice 引擎**，不需要本机安装 Office。
@@ -660,27 +676,42 @@ WPS 演示（`npm run verify:pptx-slide-ops-wps`）把它识别为 `type=17`、�
 
 | 场景 | 实测 | 目标 |
 |---|---|---|
-| 读取小型 XLSX（1000×10，10010 单元格） | **37.5 ms**（打开 2.4 + 读全表 35.1） | ≤ 2000 ms ✅ |
-| 修改小型 XLSX（改 2 格并保存） | **51.5 ms** | ≤ 3000 ms ✅ |
+| 读取小型 XLSX（1000×10，10010 单元格） | **75 ms**（打开 1.1 + 读全表 73.8） | ≤ 2000 ms ✅ |
+| 修改小型 XLSX（改 2 格并保存） | **149 ms** | ≤ 3000 ms ✅ |
 | 仅解析 ZIP 中央目录（7 个部件） | **0.1 ms** | ≤ 500 ms ✅ |
-| 中型表（20000×10，200010 单元格）读全表 | **346.8 ms**（改存 1057 ms，重开校验 1086 ms） | — |
+| 20 万单元格表**读 100 行** | **118 ms** | — |
+| 50 万单元格表**读 100 行** | **162 ms**（其中约 130 ms 是解压工作表部件） | — |
+| 50 万单元格表读全表（50 万格） | **2.3 s**（RSS 峰值含前序步骤，单步堆增量近 0） | — |
+| 10 万单元格表改 1 格并保存 | **1.02 s**（改 20 万格 1.7 s） | — |
 
-`npm run test:perf` 复现（最后一次运行：3 项达标 / 0 项未达标，RSS 峰值 667 MB）。
+`npm run test:perf:large` 复现（最后一次运行：**8 项达标 / 0 项未达标**）。
 
-本轮定位并修复了三个 O(n²) 缺陷，其中补丁重叠检测一项就让 20 万单元格写入从 **29.1 s 降到 4.6 s**。
+### 区域读取是真的按区域读（阶段 7）
 
-**诚实的边界**：实现是 O(工作表规模) 而非 O(区域规模)——读 100 行仍需先解析整张表的 XML。
-中型表（20 万单元格）每次操作 1–2 秒可接受；100 MB 级文件当前不可用，流式解析属于阶段 7。
+`office_read_range` **不再把整张表建成 DOM**，而是直接扫工作表部件的原始字节：
+
+- 扫到区域最后一行之后的第一个 `<row>` **立即停止**，因此读 100 行的代价只与这 100 行有关；
+- 共享字符串表与样式表只在真遇到对应单元格时才解析（纯数字区域根本不碰 `sharedStrings.xml`）；
+- 确定性证据（不是计时）：样本第 1000 行故意放一个非法引用，读 `A1:B2` 不报错、整表读取必报错、读 `A999:B1000` 报错（`npm run test:scan`）；
+- 等价性：套件里保留了一份**独立的 DOM 参照实现**（改造前的算法），对六种单元格类型、缺 `r` 的行/格、自闭合行、共享公式、CDATA、前置空格、越界共享下标与 13 个区域逐格比对。
+
+**诚实的边界**：
+
+- 首次读取某个工作表仍需**解压整个工作表部件**（50 MB 级表部件约 0.5–1 s），之后同进程内复用缓存。真正的流式（边解压边解析）属于后续工作。
+- 单元格解析约 **3 µs/格**（扫描 + 属性解析），50 万格读全表约 2.3 s。这比旧路径（建 DOM）快且省内存，但不是零成本。
+- **写入路径仍需把整张表解析成 DOM**（这是「只改目标区间、其余字节不变」的前提）：实测 5 万格 0.46 s / 150 MB、10 万格 0.94 s / 265 MB、20 万格 1.70 s / 495 MB。因此单表写入有硬上限 **30 万单元格**（`maxEditableCells` 可调）：超过就给 `MEMORY_LIMIT` 与出路，而不是把宿主进程拖进 GC（50 万格实测 >10 分钟不收敛）。
+- 读取上限：单次区域 **20 万格**（`MAX_RANGE_CELLS`）、整表读取 **50 万格**（`MAX_SHEET_CELLS`）；都是**在分配内存之前**拒绝，并给出可操作建议。
 
 ## 已知限制
 
 - **公式不重算**：写入公式时请同时给出缓存值，或让用户在 Excel/WPS 中打开重算。会返回 `FORMULA_NOT_RECALCULATED` 提示。
 - **行列移位不重写公式引用**：插入/删除行列只重排行号与单元格引用，公式文本、合并区域、条件格式中的引用不会自动调整，会明确返回警告。
-- **大文件**：全量载入内存，单文件上限 512 MB；实测 20 万单元格 RSS 约 665 MB。无流式处理。
+- **大文件**：读取按区域扫描（见上），但**写入**要把整张表建成 DOM，单表 >30 万单元格默认拒绝；单文件上限 512 MB。
 - **不执行宏**：`.xlsm` 的 VBA 按原字节保留但从不执行。
 - **CSV 导出是有损的**：公式、样式、图表、批注与其它工作表都不会保留，会返回 `LOSSY_CONVERT` 警告。
 - **样式能力限于字体/填充/数字格式/水平对齐**，不支持边框、垂直对齐、条件格式创建。
 - **不支持**：图表创建、透视表修改、Office/WPS 本地自动化联动（阶段 6）、PDF 表单填写/批注/合并拆分、水印的**中文**文字、OCR、PDF → Office 反向转换（阶段 5–7 计划）。
+- **`<c><v/></c>`（空值元素）读出来是 `0` 而不是 `null`**：`Number('')` 的历史行为，改造前后一致；要改成 `null` 属于语义变更，需要单独决策（已记在任务清单）。
 - **页码/日期等域不写死数字**：域的值由 Word 计算，插件写入的是域代码与一个缓存值；请按 F9（或打印预览）刷新。WPS 文字能正常打开带域文档，但 WPS COM 的 `Fields.Count` **只统计正文域**，页眉页脚里的域不出现在该集合中 —— 那里读到 0 不代表域没写进去（Word 的 `Section.Headers/Footers.Range.Fields` 读到 1，类型 33 即 `wdFieldPage`）。
 - **PDF 写入限于页面级操作与叠加文字**（旋转/删除/重排、水印、页码）：不做**原地改写已有文字**、表单填写与内容流重写；要安全地做到那些需要解析并重建内容流与字体子集，不是这一阶段能诚实交付的。
 - **加密文件**：正确识别并返回 `PASSWORD_REQUIRED`，不解密。
@@ -737,7 +768,7 @@ npm install /path/to/new-version      # 从新目录升级（会替换旧版本�
 lib/                      13 个模块，无第三方运行时依赖
   index.js        Cordis 插件入口：解析 defineTool 并注册工具
   capabilities.js 能力清单（插件版本/协议版本/已实现与未实现能力）
-  tools.js        84 个工具定义 + 统一响应信封 + 预览-执行-回滚五件套
+  tools.js        85 个工具定义 + 统一响应信封 + 预览-执行-回滚五件套
   ooxml.js        格式无关底座：ZIP 容器、字节级最小修改 XML 引擎、OPC 容器操作
   workspace.js    路径安全 / 真实类型检测 / 哈希 / 文件锁 / 临时目录 / 事务回滚
   errors.js       错误码体系 + 结构化响应
@@ -750,10 +781,11 @@ lib/                      13 个模块，无第三方运行时依赖
   image.js        格式无关图像能力（PNG 编码）
   convert.js      Office → PDF（延迟解析宿主内置 LibreOffice 引擎）
 
-test/                     41 个文件
+test/                     52 个文件
   all.mjs               总入口（npm test）
   engine.test.mjs       引擎：ZIP / XML 最小修改 / 安全防护
   xlsx.test.mjs         XLSX 适配器
+  xlsx-scan.test.mjs    XLSX 区域读取的字节扫描路径（早停证明 / 上限 / 与 DOM 参照逐格等价）
   docx.test.mjs         DOCX 适配器（读取 / 写入 / 表格 / 图片 / 样式 / 页面设置 / 校验）
   pptx.test.mjs         PPTX 适配器（读取 / 写入 / 幻灯片管理 / 复制 / 文本框）
   pdf.test.mjs          PDF 适配器（读取 / 文本提取 / 页面级写操作）
@@ -764,6 +796,8 @@ test/                     41 个文件
   convert.test.mjs      转 PDF（真实引擎，单独套件）
   perf.test.mjs         性能基准（对照文档 §14.4 目标）
   concurrency.test.mjs  并发与文件锁（串行化 / FILE_LOCKED / 残留锁回收）
+  make-xlsx-large-fixture.mjs 大样本生成器（直接拼 XML，不走 DOM）
+  read-cells-check.mjs  逐格读数，用于与 Excel/WPS 读数对照
   pack-check.mjs        发布包自检（打包 → 校验清单 → 临时安装 → 真实装载）
   profile-lifecycle-check.mjs 安装 → 升级 → 卸载 演练（含源码指纹保护）
   release-privacy-check.mjs   推前隐私扫描（本地模式表 + 内置规则）
@@ -822,7 +856,7 @@ npm run verify:boot      # 漂移 + 真实装载 + 工具数
 > 以及一条**反例测试**（apply resolve 成普通对象时加载器必须拒绝）——反例保证前两道不是碰巧通过。
 
 已实测：`dsh --profile web --dump-config` 输出里出现 `id: dsh-exp-office`；`npm run verify:boot`
-显示「安装副本与工作区逐字节一致」且「真实装载注册 84 个工具，与清单一致」。
+显示「安装副本与工作区逐字节一致」且「真实装载注册 85 个工具，与清单一致」。
 
 > **注意**：`pnpm install` 会按 `package.json` **收敛** profile 的 `node_modules` ——
 > profile 里那些「曾经装过、但已不在 `package.json` 里」的遗留依赖会被清理掉。

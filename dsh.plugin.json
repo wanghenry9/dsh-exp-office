@@ -41,6 +41,7 @@
       "office_delete_paragraph",
       "office_find_and_replace_docx",
       "office_validate_docx",
+      "office_compare_docx",
       "office_export_docx",
       "office_convert_document",
       "office_set_docx_header",

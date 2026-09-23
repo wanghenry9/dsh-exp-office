@@ -1895,6 +1895,41 @@ await test('★ office_export_docx：docx 副本逐字节一致 / 纯文本带 B
   assert.equal(wrong.error.code, 'UNSUPPORTED_FILE_TYPE')
 })
 
+await test('★ office_compare_docx：段落/表格/样式差异端到端（只读）', async () => {
+  await call('office_create_document', { path: 'cmp-a.docx', format: 'docx', title: '季度报告' })
+  const aBytes = readFileSync(join(workspace, 'cmp-a.docx'))
+  copyFileSync(join(workspace, 'cmp-a.docx'), join(workspace, 'cmp-b.docx'))
+
+  // 在 B 上做三处已知改动：改段落文字、插入段落、改表格单元格
+  // （先改文字再插入，否则插入会把后面的段落下标顶掉，改动对象就不是想改的那一段了）
+  await call('office_update_paragraph', { path: 'cmp-b.docx', index: 1, text: '本文件由 dsh-exp-office 生成（B 改过）。' })
+  await call('office_insert_paragraph', { path: 'cmp-b.docx', after: 0, text: '这是 B 新增的一段。' })
+  await call('office_update_docx_table_cell', { path: 'cmp-b.docx', table: 0, row: 1, column: 1, text: '第二列' })
+  const bBytes = readFileSync(join(workspace, 'cmp-b.docx'))
+
+  const diff = await callAndValidate('office_compare_docx', { path_a: 'cmp-a.docx', path_b: 'cmp-b.docx' })
+  assert.equal(diff.data.identical, false)
+  assert.equal(diff.data.paragraphs.total_added, 1)
+  assert.equal(diff.data.paragraphs.added[0].text, '这是 B 新增的一段。')
+  const textChange = diff.data.paragraphs.changed.find((c) => c.kind === 'text')
+  assert.ok(textChange, `应有文字修改：${JSON.stringify(diff.data.paragraphs.changed)}`)
+  assert.equal(textChange.text_after, '本文件由 dsh-exp-office 生成（B 改过）。')
+  assert.equal(diff.data.tables.changed.some((c) => c.kind === 'cell' && c.after === '第二列'), true)
+
+  // 只读：两份文件一个字节都没变
+  assert.ok(readFileSync(join(workspace, 'cmp-a.docx')).equals(aBytes), 'path_a 不应被改动')
+  assert.ok(readFileSync(join(workspace, 'cmp-b.docx')).equals(bBytes), 'path_b 不应被改动')
+
+  // 自己与自己比 → 一致
+  const same = await callAndValidate('office_compare_docx', { path_a: 'cmp-a.docx', path_b: 'cmp-a.docx' })
+  assert.equal(same.data.identical, true)
+
+  // 非 docx 被拒绝
+  const wrong = await call('office_compare_docx', { path_a: 'demo.xlsx', path_b: 'cmp-a.docx' })
+  assert.equal(wrong.success, false)
+  assert.equal(wrong.error.code, 'UNSUPPORTED_FILE_TYPE')
+})
+
 await test('★ office_set_theme + read_pptx(detail=layouts) 端到端', async () => {
   if (!hasDeck) return
   copyFileSync(deckSource, join(workspace, 'deck-theme.pptx'))
