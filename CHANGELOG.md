@@ -5,6 +5,16 @@
 ## [未发布]
 
 ### 新增
+- **阶段 5 收尾：从零生成 PDF 与表格提取**
+  - `office_create_pdf`：自写页面树 / 内容流 / 字体资源 / xref，同时写 `/ToUnicode`，因此生成的文本
+    **可被提取**（自己与第三方解析器都能读回）；自动折行与分页、`\f` 强制分页、A3–Legal 与自定义尺寸、
+    纵向/横向、元数据（非 ASCII 走 UTF-16BE+BOM）；写完立刻读回校验，页数或首行对不上就不留文件。
+    **只支持 WinAnsi 字符集**（标准 14 字体，无需嵌入）；中文会被明确拒绝 —— 中文 PDF 的正解是先写 DOCX
+    再 `office_convert_document` 转 PDF（宿主引擎带中文字体）。
+  - `office_extract_pdf_tables`：按文本片段位置推断表格（行按 y 聚类、列按 x 聚类），不依赖框线；
+    行容差按行距自动推导，用估算字宽区分「词间距」与「列间隔」，靠空格对齐的表格也能还原。
+    实测在 LibreOffice 导出的真实 PDF 上还原正确，且不会把正文误判成表格。跨页合并、合并单元格、
+    扫描件（需要 OCR）明确不做并写进返回值的 `not_done`。
 - **阶段 6：本地 Office/WPS 联动**（默认关闭，需 `allowLocalAutomation: true`）
   - `office_detect_engines`：读注册表列出本机 Office/WPS 组件与版本；`probe_com=true` 时实测 COM 可用性。
   - `office_recalculate`：用真实引擎重算（Excel 公式缓存、Word 域）后另存新文件 —— 这是「公式不重算」的正解。

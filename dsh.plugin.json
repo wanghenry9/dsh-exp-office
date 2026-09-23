@@ -82,6 +82,8 @@
       "office_add_text_box",
       "office_export_presentation",
       "office_read_pdf",
+      "office_create_pdf",
+      "office_extract_pdf_tables",
       "office_search_pdf",
       "office_validate_pdf",
       "office_rotate_pdf_pages",

@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import zlib from 'node:zlib'
 import { PdfDocument } from '../lib/pdf.js'
+import { buildPdf } from '../lib/pdf-writer.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const fixture = join(here, 'fixtures', 'sample.pdf')
@@ -1250,6 +1251,205 @@ test('★ 只读字段默认拒绝，force=true 才允许', () => {
   const forced = pdf.fillForm({ fields: { plan: 'pro' }, force: true })
   assert.equal(forced.filled_count, 1)
   assert.equal(PdfDocument.open(pdf.save()).forms().fields.find((f) => f.name === 'plan').value, 'pro')
+})
+
+console.log('\n=== 15. 从零生成 PDF ===')
+
+test('★ 生成最基本的一份：头部、页数、文本都能读回', () => {
+  const { buffer, pages } = buildPdf({ lines: ['Quarterly Sales Report', 'Second line'] })
+  assert.equal(pages, 1)
+  assert.equal(buffer.subarray(0, 8).toString('latin1'), '%PDF-1.7')
+  assert.ok(buffer.subarray(-7).toString('latin1').includes('%%EOF'))
+  const doc = PdfDocument.open(buffer)
+  assert.equal(doc.pages().length, 1)
+  assert.equal(doc.extractText().text, 'Quarterly Sales Report\nSecond line')
+})
+
+test('★ 自校验通过：自家校验器认为结构完整（含 xref 与 startxref）', () => {
+  const { buffer } = buildPdf({ lines: ['structure check'] })
+  const report = PdfDocument.open(buffer).validate()
+  assert.equal(report.valid, true, JSON.stringify(report.checks.filter((c) => !c.ok)))
+  const text = buffer.toString('latin1')
+  assert.ok(text.includes('startxref'), '必须有 startxref')
+  assert.ok(text.includes('/Type /Catalog'), '必须有文档目录')
+  assert.ok(text.includes('/BaseFont /Helvetica'), '应使用标准 14 字体')
+  assert.ok(text.includes('/ToUnicode'), '必须写 ToUnicode，否则文本提取不出来')
+})
+
+test('★ 文本可提取是设计目标：中文以外的常见字符都能读回', () => {
+  const lines = ['ASCII letters and digits 0123456789', 'Punctuation: (parens) [brackets] {braces} "quotes"', 'Accents: caf\u00e9 na\u00efve \u00e9\u00e8\u00ea \u00fc\u00f6\u00e4', 'Symbols: \u20ac \u2014 \u201csmart\u201d \u2013 \u2022']
+  const { buffer } = buildPdf({ lines })
+  const extracted = PdfDocument.open(buffer).extractText().text
+  assert.ok(extracted.includes('ASCII letters and digits 0123456789'))
+  assert.ok(extracted.includes('Punctuation: (parens) [brackets] {braces} "quotes"'))
+  assert.ok(extracted.includes('\u20ac'), '欧元符号应能读回')
+  assert.ok(extracted.includes('\u2014'), '长破折号应能读回')
+})
+
+test('★ 中文被明确拒绝，并且不会留下半个文件', () => {
+  assert.throws(
+    () => buildPdf({ lines: ['季度销售报告'] }),
+    (err) => err.code === 'UNSUPPORTED_FEATURE' && /WinAnsi|标准 14 字体/.test(err.message)
+  )
+})
+
+test('转义：括号与反斜杠不会破坏内容流', () => {
+  const tricky = 'a (b) c \\\\ d (unbalanced ( and )'
+  const { buffer } = buildPdf({ lines: [tricky] })
+  const doc = PdfDocument.open(buffer)
+  assert.equal(doc.validate().valid, true)
+  assert.ok(doc.extractText().text.includes('(b)'), '括号应对称读回')
+  assert.ok(doc.extractText().text.includes('\\\\'), '反斜杠应读回')
+})
+
+test('多页：自动分页与强制分页都按预期', () => {
+  const many = Array.from({ length: 120 }, (_, i) => `line ${i + 1}`)
+  const auto = buildPdf({ lines: many, fontSizePt: 11 })
+  assert.ok(auto.pages > 1, `120 行应分成多页，实际 ${auto.pages} 页`)
+  assert.equal(PdfDocument.open(auto.buffer).pages().length, auto.pages)
+
+  const forced = buildPdf({ lines: ['page one', '\fpage two', '\fpage three'] })
+  assert.equal(forced.pages, 3)
+  const text = PdfDocument.open(forced.buffer).extractText()
+  assert.equal(text.pages, 3)
+  assert.ok(text.text.includes('page one'))
+  assert.ok(text.text.includes('page three'))
+})
+
+test('折行：超宽文本被折开并给出可核对的行数', () => {
+  const long = 'word '.repeat(80).trim()
+  const { lines } = buildPdf({ lines: [long], fontSizePt: 11, pageSize: 'A5' })
+  assert.ok(lines > 1, `超宽文本应折行，实际 ${lines} 行`)
+})
+
+test('纸张与方向：横向会交换宽高', () => {
+  const portrait = buildPdf({ lines: ['x'], pageSize: 'A4', orientation: 'portrait' })
+  const landscape = buildPdf({ lines: ['x'], pageSize: 'A4', orientation: 'landscape' })
+  const boxOf = (buffer) => {
+    const match = /\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/.exec(buffer.toString('latin1'))
+    return match ? [Number(match[1]), Number(match[2])] : null
+  }
+  const p = boxOf(portrait.buffer)
+  const l = boxOf(landscape.buffer)
+  assert.ok(p[1] > p[0], '纵向应高大于宽')
+  assert.equal(l[0], p[1])
+  assert.equal(l[1], p[0])
+})
+
+test('元数据：ASCII 与非 ASCII（UTF-16BE + BOM）都能读回', () => {
+  const { buffer } = buildPdf({ lines: ['x'], metadata: { title: 'Quarterly Report', author: '季度报告作者' } })
+  const meta = PdfDocument.open(buffer).metadata()
+  assert.equal(meta.title, 'Quarterly Report')
+  assert.equal(meta.author, '季度报告作者')
+})
+
+test('参数校验：纸张/方向/字号/行类型都有明确错误', () => {
+  assert.throws(() => buildPdf({ lines: ['x'], pageSize: 'B5' }), (e) => e.code === 'INVALID_REQUEST')
+  assert.throws(() => buildPdf({ lines: ['x'], orientation: 'sideways' }), (e) => e.code === 'INVALID_REQUEST')
+  assert.throws(() => buildPdf({ lines: ['x'], fontSizePt: 0 }), (e) => e.code === 'INVALID_REQUEST')
+  assert.throws(() => buildPdf({ lines: [42] }), (e) => e.code === 'INVALID_REQUEST')
+  assert.throws(() => buildPdf({ lines: ['x'], marginPt: 400 }), (e) => e.code === 'INVALID_REQUEST')
+  assert.throws(() => buildPdf({ lines: ['x'], fontFamily: 'comic' }), (e) => e.code === 'INVALID_REQUEST')
+})
+
+test('★ 生成的 PDF 可继续被自家页面操作编辑（不是死文件）', () => {
+  const { buffer } = buildPdf({ lines: ['first page', '\fsecond page'] })
+  const doc = PdfDocument.open(buffer)
+  doc.rotatePage({ page: 0, degrees: 90 })
+  doc.addTextOverlay({ text: 'OVERLAY', pages: [1] })
+  const saved = doc.save()
+  const reopened = PdfDocument.open(saved)
+  assert.equal(reopened.pages().length, 2)
+  assert.equal(reopened.pages()[0].value.Rotate, 90)
+  assert.ok(reopened.extractText().text.includes('OVERLAY'))
+})
+
+test('压缩开关都产出合法文件', () => {
+  for (const compress of [true, false]) {
+    const { buffer } = buildPdf({ lines: ['compress check'], compress })
+    const doc = PdfDocument.open(buffer)
+    assert.equal(doc.validate().valid, true)
+    assert.equal(doc.extractText().text, 'compress check')
+  }
+})
+
+console.log('\n=== 16. 表格提取（纯位置推断）===')
+
+test('★ 真实 PDF（LibreOffice 从带表格的 DOCX 导出）里读出正确的二维表格', () => {
+  const file = join(here, 'fixtures', 'sample.pdf')
+  if (!existsSync(file)) return
+  const doc = PdfDocument.open(readFileSync(file))
+  const result = doc.extractTables()
+  assert.equal(result.table_count, 1, `应恰好识别 1 张表，实际 ${result.table_count}`)
+  const table = result.tables[0]
+  assert.equal(table.row_count, 2)
+  assert.equal(table.column_count, 2)
+  assert.deepEqual(table.rows, [
+    ['月份', '金额'],
+    ['1月', '12000']
+  ])
+})
+
+test('★ 多页 PDF：只在含表格的那一页报出表格', () => {
+  const file = join(here, 'fixtures', 'sample-multipage.pdf')
+  if (!existsSync(file)) return
+  const doc = PdfDocument.open(readFileSync(file))
+  const result = doc.extractTables()
+  assert.equal(result.table_count, 1)
+  const table = result.tables[0]
+  assert.equal(table.page, 2, '表格在第 3 页（下标 2）')
+  assert.deepEqual(table.rows[0], ['模块', '状态', '测试数'])
+  assert.equal(table.rows.length, 3)
+})
+
+test('★ 没有表格的 PDF 不会凭空报出表格（不误判正文）', () => {
+  const { buffer } = buildPdf({ lines: ['Just a paragraph of prose.', 'Another line without any column alignment.', 'Third line.'] })
+  const result = PdfDocument.open(buffer).extractTables()
+  assert.equal(result.table_count, 0, `不应把正文当表格：${JSON.stringify(result.tables)}`)
+})
+
+test('★ 自己生成的表格能被自己读回来（等宽字体列对齐）', () => {
+  const rows = [
+    ['Region', 'Revenue'],
+    ['North', '12000'],
+    ['South', '9500']
+  ]
+  const lines = rows.map(([left, right]) => `${left}${' '.repeat(Math.max(1, 24 - left.length))}${right}`)
+  const { buffer } = buildPdf({ lines, fontFamily: 'courier' })
+  const result = PdfDocument.open(buffer).extractTables()
+  assert.equal(result.table_count, 1, `等宽字体下应识别为表格：${JSON.stringify(result.tables)}`)
+  assert.equal(result.tables[0].rows.length, 3)
+})
+
+test('接口如实报告方法与未做的部分', () => {
+  const file = join(here, 'fixtures', 'sample.pdf')
+  if (!existsSync(file)) return
+  const result = PdfDocument.open(readFileSync(file)).extractTables()
+  assert.match(result.method, /位置/)
+  assert.ok(result.not_done.some((item) => /OCR/.test(item)), '必须说明扫描件需要 OCR')
+  assert.ok(Array.isArray(result.approximation) && result.approximation.length > 0)
+})
+
+test('textRuns 给出坐标与字号，并如实说明近似之处', () => {
+  const file = join(here, 'fixtures', 'sample.pdf')
+  if (!existsSync(file)) return
+  const doc = PdfDocument.open(readFileSync(file))
+  const runs = doc.textRuns({ page: 0 })
+  assert.ok(runs.runs.length > 0)
+  const first = runs.runs[0]
+  assert.equal(typeof first.x, 'number')
+  assert.equal(typeof first.y, 'number')
+  assert.equal(typeof first.font_size, 'number')
+  assert.ok(runs.approximation.some((item) => /旋转|缩放/.test(item)), '必须说明坐标不含旋转与缩放')
+})
+
+test('表格参数校验：容差/阈值必须是正数', () => {
+  const file = join(here, 'fixtures', 'sample.pdf')
+  if (!existsSync(file)) return
+  const doc = PdfDocument.open(readFileSync(file))
+  assert.throws(() => doc.extractTables({ rowTolerance: -1 }), (e) => e.code === 'INVALID_REQUEST')
+  assert.throws(() => doc.extractTables({ columnGap: 0 }), (e) => e.code === 'INVALID_REQUEST')
+  assert.throws(() => doc.extractTables({ minRows: 0 }), (e) => e.code === 'INVALID_REQUEST')
 })
 
 console.log(`\n结果：${passed} 通过，${failed} 失败\n`)

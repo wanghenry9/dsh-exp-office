@@ -20,7 +20,7 @@
 
 ```bash
 # 在工作区中开发与自测
-npm test                      # 全部套件（682 项断言，约 17 秒）
+npm test                      # 全部套件（714 项断言，约 40 秒）
 npm run test:engine           # 引擎：ZIP / XML 最小修改 / 安全防护
 npm run test:xlsx             # XLSX 适配器（含样式与导出）
 npm run test:docx             # DOCX 适配器（读取 / 写入 / 校验）
@@ -47,7 +47,7 @@ npm run verify:boot           # profile 启动自检：副本漂移 + 真实 Cor
       name: 'dsh-exp-office'
 ```
 
-## 工具清单（85 个）
+## 工具清单（90 个）
 
 | 分类 | 工具 | 说明 |
 |---|---|---|
@@ -130,6 +130,8 @@ npm run verify:boot           # profile 启动自检：副本漂移 + 真实 Cor
 | 本地联动 | `office_detect_engines` | 检测本机 Office/WPS 组件与版本（默认只读注册表；`probe_com=true` 会实测 COM 可用性，需授权） |
 | 本地联动 | `office_recalculate` | 用**真实引擎**重算（Excel 公式缓存 / Word 域）后另存新文件；源文件永不改动（需授权） |
 | 本地联动 | `office_rerender` | 用**真实引擎**整份重写（等价于用 Office 重新保存）后另存新文件；源文件永不改动（需授权） |
+| PDF | `office_create_pdf` | **从零生成** PDF（自写页面树/内容流/字体资源/xref，含 `/ToUnicode` 因此文本可提取）；标准 14 字体，只支持 WinAnsi 字符集 |
+| PDF | `office_extract_pdf_tables` | 按文本位置推断表格（行按 y 聚类、列按 x 聚类，不依赖框线），返回二维单元格文本 |
 | 转换 | `office_convert_document` | docx/xlsx/pptx → PDF（宿主内置 LibreOffice 引擎） |
 | 任务 | `office_preview_operation` | 预览计划，返回 `plan_id` 与风险评级 |
 | 任务 | `office_execute_operation` | 执行计划（自动备份 + 校验） |
@@ -759,6 +761,54 @@ Excel 重算后读到 **3**、WPS 重算后同样读到 **3**；Word / PowerPoin
 
 > 明确没做的：受限账户/沙箱隔离（需要运维层面配合）、视觉回归（要渲染成图片）、把 COM 对象直接暴露给 Agent（开发要求明令禁止）。
 
+## 从零生成 PDF（阶段 5 收尾）
+
+`office_create_pdf` **不依赖模板与任何第三方库**：页面树、内容流、字体资源、xref 全部自己写，
+并同时写入 `/ToUnicode`，因此生成的文本**可以被提取**（自己与第三方解析器都能读回）。
+
+| 能力 | 说明 |
+|---|---|
+| 排版 | 自动折行、自动分页、`\f` 前缀强制分页；纸张 A3/A4/A5/Letter/Legal 或自定义点尺寸；纵向/横向；页边距/字号/行距/字体可调 |
+| 字体 | PDF 标准 14 字体（Helvetica / Times / Courier 各四体），**无需嵌入字体**，任何阅读器都能打开 |
+| 文本 | 括号/反斜杠/高位字符按 PDF 语法转义；`/ToUnicode` 覆盖 WinAnsi 全表 |
+| 元数据 | Title/Author/Subject/Keywords/Creator/Producer；非 ASCII 值按 UTF-16BE + BOM 写 |
+| 自校验 | 写完立刻用自己的读取器读回：页数不对或第一行文本读不回就**不留文件** |
+
+**诚实的边界（重要）**：
+
+- **只支持 WinAnsi 字符集**（拉丁字母、数字、常见标点、带重音的西欧字母）。**中日韩文字会被明确拒绝**
+  （`UNSUPPORTED_FEATURE`，并列出具体字符），因为标准 14 字体没有汉字字形，要写中文必须嵌入字体子集 ——
+  那是 `pdf.create.cjk`，当前**未实现**。
+- **中文 PDF 的正确打开方式是**：`office_create_document`（docx）+ `office_insert_paragraph` 写内容，
+  再用 `office_convert_document` 转 PDF —— 宿主内置引擎带完整中文字体，中文不会乱码。
+- 不做富文本（行内混排样式）、图片、矢量图形、表格框线与页码。
+
+## 表格提取（阶段 5 收尾）
+
+`office_extract_pdf_tables` 从 PDF 里还原表格：**按文本片段的位置推断**——
+先把 y 坐标的间隔推成行距、据此聚类成行，再按 x 坐标聚类成列，行 × 列得到单元格文本。
+不依赖表格框线（很多 PDF 根本没有框线）。
+
+| 细节 | 做法 |
+|---|---|
+| 行容差 | **自动推导**：同一行里汉字与数字的基线常差几个点（实测 4.9 pt），写死容差会把一行拆成两行 |
+| 列间隔 | 用估算字宽（CJK 1 em、其余 0.5 em）判断「这是词间距还是列间隔」；正文里的词间距不会被误判成列 |
+| 靠空格对齐的表格 | 一个字符串里用连续空格分列的（等宽排版），会按两空格以上切成虚拟列 —— 包括**本插件自己生成的 PDF** |
+| 多张表 | 连续的「表格行」组成一张表；正文行会中断成表过程，因此同一页的多张表会分别报出 |
+| 诚实报告 | 返回值里带 `method`、`approximation`（近似之处）与 `not_done`（跨页合并、合并单元格、扫描件） |
+
+实测（真实 PDF，均由 LibreOffice 从带表格的 DOCX 导出）：
+
+| 样本 | 提取结果 |
+|---|---|
+| `sample.pdf`（2×2 表） | `[["月份","金额"],["1月","12000"]]` ✅ 与源文档一致 |
+| `sample-multipage.pdf`（第 3 页 3×3 表） | `[["模块","状态","测试数"],["XLSX","已完成","46"],["DOCX","已完成","73"]]` ✅ 只在第 3 页报表 |
+| 无表格的 PDF（含本插件生成的） | 报 0 张表，**不把正文误判成表格** |
+| 独立交叉验证 | Word 自带的 PDF 解析器在同一份 PDF 里同样读到 `12000`（`MATCH_COUNT 1`） |
+
+**明确不做**：跨页表格自动合并、合并单元格的跨行跨列还原、扫描件与纯图片表格（需要 OCR，当前不支持）、
+单元格内换行与富文本样式。
+
 ## 并发与文件锁
 
 同一文件被并发修改时的行为是**明确契约**，有专门的测试套件（`npm run test:concurrency`）盯着：
@@ -801,10 +851,10 @@ npm install /path/to/new-version      # 从新目录升级（会替换旧版本�
 ## 目录结构
 
 ```
-lib/                      15 个模块，无第三方运行时依赖
+lib/                      16 个模块，无第三方运行时依赖
   index.js        Cordis 插件入口：解析 defineTool 并注册工具
   capabilities.js 能力清单（插件版本/协议版本/已实现与未实现能力）
-  tools.js        88 个工具定义 + 统一响应信封 + 预览-执行-回滚五件套
+  tools.js        90 个工具定义 + 统一响应信封 + 预览-执行-回滚五件套
   ooxml.js        格式无关底座：ZIP 容器、字节级最小修改 XML 引擎、OPC 容器操作
   workspace.js    路径安全 / 真实类型检测 / 哈希 / 文件锁 / 临时目录 / 事务回滚
   errors.js       错误码体系 + 结构化响应
@@ -819,7 +869,7 @@ lib/                      15 个模块，无第三方运行时依赖
   automation.js   本地 Office/WPS 联动（开关 / 超时 / 进程回收 / 审计）
   office-automation.ps1  唯一与本地 Office/WPS 通话的脚本（固定模板、纯 ASCII、参数化）
 
-test/                     52 个文件
+test/                     54 个文件
   all.mjs               总入口（npm test）
   engine.test.mjs       引擎：ZIP / XML 最小修改 / 安全防护
   xlsx.test.mjs         XLSX 适配器
@@ -896,7 +946,7 @@ npm run verify:boot      # 漂移 + 真实装载 + 工具数
 > 以及一条**反例测试**（apply resolve 成普通对象时加载器必须拒绝）——反例保证前两道不是碰巧通过。
 
 已实测：`dsh --profile web --dump-config` 输出里出现 `id: dsh-exp-office`；`npm run verify:boot`
-显示「安装副本与工作区逐字节一致」且「真实装载注册 85 个工具，与清单一致」。
+显示「安装副本与工作区逐字节一致」且「真实装载注册 90 个工具，与清单一致」。
 
 > **注意**：`pnpm install` 会按 `package.json` **收敛** profile 的 `node_modules` ——
 > profile 里那些「曾经装过、但已不在 `package.json` 里」的遗留依赖会被清理掉。

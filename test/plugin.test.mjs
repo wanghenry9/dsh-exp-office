@@ -1930,6 +1930,67 @@ await test('★ office_compare_docx：段落/表格/样式差异端到端（只�
   assert.equal(wrong.error.code, 'UNSUPPORTED_FILE_TYPE')
 })
 
+await test('★ office_create_pdf：从零生成 → 读回 → 校验 → 拒绝覆盖与中文', async () => {
+  const created = await callAndValidate('office_create_pdf', {
+    path: 'created.pdf',
+    lines: ['Quarterly Report', '', 'Marker: E2E-CREATED-PDF', '\fSecond page'],
+    title: '从零生成端到端'
+  })
+  assert.equal(created.data.pages, 2)
+  assert.equal(created.data.text_extractable, true)
+  assert.ok(readFileSync(join(workspace, 'created.pdf')).subarray(0, 8).toString('latin1') === '%PDF-1.7')
+
+  // 读回：文本、页数、元数据都对得上
+  const read = await callAndValidate('office_read_pdf', { path: 'created.pdf', detail: 'text' })
+  assert.ok(read.data.text.includes('E2E-CREATED-PDF'))
+  const pages = await callAndValidate('office_read_pdf', { path: 'created.pdf', detail: 'pages' })
+  assert.equal(pages.data.pages.length, 2)
+  assert.equal(pages.data.structure.page_count, 2)
+
+  // 校验器也认
+  const valid = await callAndValidate('office_validate_pdf', { path: 'created.pdf' })
+  assert.equal(valid.data.valid, true)
+
+  // 还能继续被页面操作编辑
+  const rotated = await callAndValidate('office_rotate_pdf_pages', { path: 'created.pdf', page: 0, degrees: 90 })
+  assert.equal(rotated.success, true)
+
+  // 已存在 → 拒绝覆盖
+  const again = await call('office_create_pdf', { path: 'created.pdf', lines: ['x'] })
+  assert.equal(again.success, false)
+  assert.equal(again.error.code, 'PERMISSION_DENIED')
+
+  // 中文 → 明确拒绝（标准 14 字体不支持）
+  const cjk = await call('office_create_pdf', { path: 'cjk.pdf', lines: ['季度报告'] })
+  assert.equal(cjk.success, false)
+  assert.equal(cjk.error.code, 'UNSUPPORTED_FEATURE')
+  assert.equal(existsSync(join(workspace, 'cjk.pdf')), false, '被拒绝时不能留下文件')
+})
+
+await test('★ office_extract_pdf_tables：真实 PDF 里读出正确表格', async () => {
+  const sample = join(here, 'fixtures', 'sample.pdf')
+  if (!existsSync(sample)) return
+  copyFileSync(sample, join(workspace, 'table-sample.pdf'))
+  const result = await callAndValidate('office_extract_pdf_tables', { path: 'table-sample.pdf' })
+  assert.equal(result.data.table_count, 1)
+  assert.deepEqual(result.data.tables[0].rows, [
+    ['月份', '金额'],
+    ['1月', '12000']
+  ])
+  assert.equal(result.data.tables[0].page, 0)
+
+  // 没有表格 → 明确提示，而不是报错或返回空数组
+  await call('office_create_pdf', { path: 'no-table.pdf', lines: ['Just prose here.', 'No columns at all.'] })
+  const none = await callAndValidate('office_extract_pdf_tables', { path: 'no-table.pdf' })
+  assert.equal(none.data.table_count, 0)
+  assert.ok(none.warnings.some((w) => w.code === 'NO_TABLE_FOUND'))
+
+  // 参数校验
+  const bad = await call('office_extract_pdf_tables', { path: 'no-table.pdf', min_rows: 0 })
+  assert.equal(bad.success, false)
+  assert.equal(bad.error.code, 'INVALID_REQUEST')
+})
+
 await test('★ 本地引擎联动：默认关闭时拒绝启动，只读检测仍然可用', async () => {
   // 1) 只读注册表检测：不需要授权，也不启动任何程序
   const detect = await callAndValidate('office_detect_engines', {})
