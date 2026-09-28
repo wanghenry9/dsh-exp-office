@@ -34,6 +34,8 @@
     "test:scan": "node test/xlsx-scan.test.mjs",
     "test:automation": "node test/automation.test.mjs",
     "verify:automation": "node test/automation-check.mjs",
+    "verify:audit": "node test/audit-check.mjs",
+    "test:audit": "node test/audit.test.mjs",
     "fixture:xlsx-large": "node test/make-xlsx-large-fixture.mjs",
     "verify:xlsx-large": "pwsh -File test/office-open-check.ps1 -Path test/fixtures/large-500k.xlsx",
     "test:docx": "node test/docx.test.mjs",

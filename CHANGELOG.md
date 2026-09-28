@@ -5,6 +5,17 @@
 ## [未发布]
 
 ### 新增
+- **统一操作审计**（`lib/audit.js`，阶段 7「日志、监控和审计」）
+  - 每个工具调用落一行 JSONL：`time` / `tool` / `duration_ms` / `ok` / `error_code` / `target` /
+    `request_id` / `changes_count` / `output_bytes`；插件装载时另记一条 `registered` 事件
+  - **默认关闭**（`auditLogEnabled: false`），与本地联动同一原则：不问就不写
+  - **只记元数据**：不写正文与单元格值；路径默认只留**文件名**（`basename`），可切 `relative`，
+    工作区之外的路径一律退回文件名 —— 测试里有硬断言「整份日志不含盘符路径」
+  - **绝不拖累工具**：写盘失败只累加 `writeErrors` / `lastError`；工具真抛异常也先记一行再抛
+  - 超过 `auditLogMaxBytes`（默认 8 MB）轮转为 `.1`
+  - 独立验证 `npm run verify:audit`：用 **.NET 的 JSON 解析器**（PowerShell `ConvertFrom-Json`）
+    逐行读回并断言行数、失败行、耗时字段与「无绝对路径」
+  - 新测试套件 `test/audit.test.mjs`（12 项）→ 套件数 12 → **13**，断言 719 → **731**
 - **中文水印 / 页码**（阶段 5 收尾）：`office_add_pdf_watermark` 与 `office_add_pdf_page_numbers`
   现在支持中文 —— 叠加式写入的绘制流里挂一份**只带用到的字形的字体子集**
   （Type0 + CIDFontType2 + FontFile2 + CIDToGIDMap + ToUnicode，与 `office_create_pdf` 复用同一套机制）。

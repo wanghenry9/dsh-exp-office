@@ -69,6 +69,7 @@ office_recalculate  { "path": "sales.xlsx", "engine": "auto" }
 - **不假装做到**：`validate_*` 会如实列出「需要渲染才能判定」的检查项（空白页、元素重叠、字体替换…），不返回一个假的「全部通过」
 - **本地联动默认关闭**：驱动本机 Office/WPS 需要显式配置；禁宏、禁外链更新、禁弹窗、超时清理，且**只清理自己启动的进程**
 
+
 ## 已知限制
 
 - **公式不重算**：写公式请同时给缓存值，或用 `office_recalculate`（需开启本地联动）让真实引擎重算
@@ -92,17 +93,32 @@ office_recalculate  { "path": "sales.xlsx", "engine": "auto" }
 | `maxEditableCells` | 30 万 | 单张工作表可安全编辑的单元格上限 |
 | `allowLocalAutomation` | **`false`** | 是否允许启动本机 Office/WPS 做重算 / 重渲染 |
 | `automationTimeoutMs` | 120000 | 本地引擎单次调用超时（毫秒） |
+| `auditLogEnabled` | **`false`** | 是否开启统一操作审计（每个工具调用一行 JSONL） |
+| `auditLogPath` | `<工作区>/.dsh-exp-office/audit/office-tools.jsonl` | 审计文件位置 |
+| `auditLogPathMode` | `basename` | 路径记录方式：`basename` 只留文件名 / `relative` 工作区相对路径 |
+| `auditLogMaxBytes` | 8 MB | 审计单文件上限，超过轮转为 `.1` |
+
+### 审计日志（可选）
+
+开启后每次工具调用落一行 JSONL：`time` / `tool` / `duration_ms` / `ok` / `error_code` / `target` / `output_bytes`，
+插件装载时另记一条 `registered` 事件（能回答「这份日志从哪次启动开始」）。
+
+- **只记元数据**：不写文档正文、不写单元格值；路径默认只留**文件名**，需要定位时可切 `relative`
+- **写盘失败绝不影响工具**：审计是尽力而为，异常只累加在 `writeErrors` 里
+- **不问就不写**：默认关闭，与本地联动同一原则
+- 是**标准 JSONL**：`jq`、日志采集器、Excel 都能直接吃（独立验证正是用 .NET 的 JSON 解析器读回来的）
 
 ## 验证
 
 ```bash
-npm test                      # 12 个套件 / 719 项断言（含保真度、并发、本地联动）
+npm test                      # 13 个套件 / 731 项断言（含保真度、并发、本地联动、审计）
 npm run verify:excel          # 真实 Excel 打开插件输出并读数
 npm run verify:word           # 真实 Word 打开并读数
 npm run verify:pptx           # 真实 PowerPoint 打开并读数
 npm run verify:automation     # 真实引擎重算：写错的公式缓存 999 → 重算成 3
 npm run verify:pdf-cjk        # 中文 PDF：用 Word 的 PDF 解析器独立核对文本
 npm run verify:privacy        # 推前隐私扫描（0 命中才提交）
+
 
 ```
 
@@ -115,7 +131,8 @@ npm run verify:privacy        # 推前隐私扫描（0 命中才提交）
 | 文档 | 内容 |
 |---|---|
 | [能力与验证](docs/能力与验证.md) | 逐格式能力、跨软件验证矩阵、性能读数、并发契约、目录结构、安装细节 |
-
+| [Harness 兼容矩阵](docs/Harness兼容矩阵.md) | 各 DSH 版本的实测结果、复现命令、覆盖边界 |
+| [审计日志](docs/审计日志.md) | 统一操作审计的字段、开关、隐私约束与独立验证 |
 | [本地联动安全说明](docs/本地联动安全说明.md) | 本地 Office/WPS 自动化的逐条安全对照与审计字段 |
 | [OCR 能力核查](docs/OCR能力核查.md) | 本机 OCR 能力的核查结论（命令 + 原始输出） |
 | [阶段 0 技术方案](docs/阶段0-技术方案.md) | 选型、协议、错误码与安全设计的完整方案 |
