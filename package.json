@@ -46,6 +46,8 @@
     "test:concurrency": "node test/concurrency.test.mjs",
     "verify:lifecycle": "node test/profile-lifecycle-check.mjs",
     "verify:pack": "node test/pack-check.mjs",
+    "gen:capabilities": "node test/capability-matrix.mjs",
+    "verify:capabilities": "node test/capability-matrix.mjs --check",
     "verify:privacy": "node test/release-privacy-check.mjs",
     "test:perf": "node test/perf.test.mjs",
     "test:perf:large": "node test/perf.test.mjs --large",

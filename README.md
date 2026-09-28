@@ -114,7 +114,7 @@ office_recalculate  { "path": "sales.xlsx", "engine": "auto" }
 ## 验证
 
 ```bash
-npm test                          # 14 个套件 / 748 项断言（保真度、并发、本地联动、审计、流式）
+npm test                          # 15 个套件 / 753 项断言（保真度、并发、审计、流式、清单一致性）
 npm run verify:excel              # 真实 Excel 打开插件输出并读数
 npm run verify:word               # 真实 Word 打开并读数
 npm run verify:pptx               # 真实 PowerPoint 打开并读数
@@ -125,6 +125,7 @@ npm run verify:xlsx-huge          # 100 MB 级样本：峰值内存 86 MB / 读�
 npm run verify:audit              # 审计日志：用 .NET 的 JSON 解析器独立读回
 npm run verify:matrix             # Harness 兼容矩阵：装进各版本自己的 dsh-tools（需网络）
 npm run verify:privacy            # 推前隐私扫描（0 命中才提交）
+npm run verify:capabilities       # 能力矩阵与代码不漂移（清单 ↔ 运行时定义 ↔ 文档）
 ```
 ```
 
@@ -136,6 +137,7 @@ npm run verify:privacy            # 推前隐私扫描（0 命中才提交）
 
 | 文档 | 内容 |
 |---|---|
+| [能力矩阵与验收清单](docs/能力矩阵.md) | 交付前自检：工具总表（生成）、验证矩阵、验收命令、验证缺口、明确不做 |
 | [能力与验证](docs/能力与验证.md) | 逐格式能力、跨软件验证矩阵、性能读数、并发契约、目录结构、安装细节 |
 | [Harness 兼容矩阵](docs/Harness兼容矩阵.md) | 各 DSH 版本的实测结果、复现命令、覆盖边界 |
 | [审计日志](docs/审计日志.md) | 统一操作审计的字段、开关、隐私约束与独立验证 |

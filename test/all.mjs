@@ -21,6 +21,7 @@ const SUITES = [
   ['宏启用工作簿（检测与字节保留）', 'macro.test.mjs'],
   ['插件集成：注册 / 端到端 / 事务 / 任务五件套', 'plugin.test.mjs'],
   ['统一操作审计（格式 / 隐私 / 轮转 / 不添麻烦）', 'audit.test.mjs'],
+  ['能力矩阵一致性（清单 ↔ 运行时定义 ↔ 文档）', 'capabilities.test.mjs'],
   ['并发与文件锁', 'concurrency.test.mjs'],
   ['本地 Office/WPS 联动（Node 侧，桩脚本）', 'automation.test.mjs']
 ]
