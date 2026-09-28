@@ -103,6 +103,7 @@ npm run verify:pptx           # 真实 PowerPoint 打开并读数
 npm run verify:automation     # 真实引擎重算：写错的公式缓存 999 → 重算成 3
 npm run verify:pdf-cjk        # 中文 PDF：用 Word 的 PDF 解析器独立核对文本
 npm run verify:privacy        # 推前隐私扫描（0 命中才提交）
+
 ```
 
 验证口径是「**第三方能读出才算数**」：例如从零生成的中文 PDF，自家读取器读得出来不算完成，
@@ -114,6 +115,7 @@ npm run verify:privacy        # 推前隐私扫描（0 命中才提交）
 | 文档 | 内容 |
 |---|---|
 | [能力与验证](docs/能力与验证.md) | 逐格式能力、跨软件验证矩阵、性能读数、并发契约、目录结构、安装细节 |
+
 | [本地联动安全说明](docs/本地联动安全说明.md) | 本地 Office/WPS 自动化的逐条安全对照与审计字段 |
 | [OCR 能力核查](docs/OCR能力核查.md) | 本机 OCR 能力的核查结论（命令 + 原始输出） |
 | [阶段 0 技术方案](docs/阶段0-技术方案.md) | 选型、协议、错误码与安全设计的完整方案 |
@@ -124,7 +126,7 @@ npm run verify:privacy        # 推前隐私扫描（0 命中才提交）
 ## 环境要求
 
 - **Node.js ≥ 22.19.0**（用到内置 `zlib.crc32` 与 `node:crypto`）
-- **DSH ≥ 0.1.0-rc.6**（已在 0.1.6-alpha.2 实测装载与工具注册）
+- **DSH ≥ 0.1.0-rc.6**（实测矩阵：工具层 `0.1.2-rc.1`〜`0.1.7-rc.2` 全通过，CLI 层在 `0.1.6-alpha.2` 与 `0.1.7-rc.2` 上装得进、加载得了 —— 见 [Harness 兼容矩阵](docs/Harness兼容矩阵.md)）
 - 无第三方运行时依赖；不需要本机安装 Office（本地联动是可选能力）
 
 ## 许可
