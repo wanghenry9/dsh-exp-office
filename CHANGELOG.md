@@ -5,6 +5,18 @@
 ## [未发布]
 
 ### 新增
+- **大文件流式读取**（阶段 7「大文件」，最后一项欠账）
+  - 工作表部件 >32 MB 时自动改用**流式解压 + 逐行扫描**：`zlib.createInflateRaw` 分块喂入，
+    扫描器按 `<row>` 切片消费，内存与部件大小解耦；小部件仍走原有同步路径（零回归）
+  - 实测（200 万单元格 / 未压缩部件 178.7 MB）：峰值 RSS **420 MB → 86 MB**、
+    读开头 **1050 ms → 15 ms**、读尾部 **1545 ms → 616 ms**；与同步路径**逐格一致**
+  - `office_read_range` 在流式路径下回报 `read_mode` / `part_bytes`，并给出 `STREAMED_PART` 提示
+  - **顺带修掉两个真问题**：① 流式完整消费后校验 ZIP **CRC32**（实测把 deflate 数据全改成 0xFF
+    仍能解出等长结果，只看长度发现不了）；② zlib 的裸异常统一转成 `CORRUPTED_DOCUMENT`
+  - 新测试套件 `test/xlsx-stream.test.mjs`（17 项）与验收基准 `npm run verify:xlsx-huge`
+    → 套件数 13 → **14**，断言 731 → **748**
+  - 写入侧**明确不做流式**：100 MB 级文件是「能读不能改」，理由与上限写在 `docs/大文件流式.md`
+
 - **统一操作审计**（`lib/audit.js`，阶段 7「日志、监控和审计」）
   - 每个工具调用落一行 JSONL：`time` / `tool` / `duration_ms` / `ok` / `error_code` / `target` /
     `request_id` / `changes_count` / `output_bytes`；插件装载时另记一条 `registered` 事件

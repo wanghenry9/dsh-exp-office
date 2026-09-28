@@ -38,6 +38,8 @@
     "test:audit": "node test/audit.test.mjs",
     "fixture:xlsx-large": "node test/make-xlsx-large-fixture.mjs",
     "verify:xlsx-large": "pwsh -File test/office-open-check.ps1 -Path test/fixtures/large-500k.xlsx",
+    "verify:xlsx-huge": "node test/xlsx-huge-bench.mjs",
+    "test:xlsx-stream": "node test/xlsx-stream.test.mjs",
     "test:docx": "node test/docx.test.mjs",
     "test:fidelity": "node test/fidelity.test.mjs",
     "test:plugin": "node test/plugin.test.mjs",

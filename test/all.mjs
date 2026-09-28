@@ -12,6 +12,7 @@ const SUITES = [
   ['引擎：ZIP 容器 / XML 最小修改 / 安全防护', 'engine.test.mjs'],
   ['XLSX 适配器', 'xlsx.test.mjs'],
   ['XLSX 区域读取的字节扫描路径（早停 / 上限 / 与 DOM 参照等价）', 'xlsx-scan.test.mjs'],
+  ['XLSX 大部件流式读取（解压分块 / 逐格等价 / CRC / 阈值分流）', 'xlsx-stream.test.mjs'],
   ['DOCX 适配器（读取 / 写入 / 校验）', 'docx.test.mjs'],
   ['PPTX 适配器（读取 / 写入 / 幻灯片管理）', 'pptx.test.mjs'],
   ['PDF 适配器（读取与文本提取）', 'pdf.test.mjs'],

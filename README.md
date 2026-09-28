@@ -4,6 +4,7 @@
 
 - **90 个工具**，覆盖四种格式 + 任务预览/执行/回滚五件套
 - **字节级最小修改**：只改目标区间，图表、图片、宏、条件格式等部件逐字节不变
+- **大文件读取是流式的**：部件 >32 MB 时边解压边扫描，读多少留多少（178.7 MB 部件峰值仅 86 MB）
 - **写入即事务**：文件锁 → 暂存 → 重新打开校验 → 原子替换，失败保留原文件
 - **可信的验证**：12 个测试套件 719 项断言全绿，并用真实 Excel / Word / PowerPoint / WPS / Word 的 PDF 解析器交叉核对
 - **能提取的文本才有用**：插件写出的 PDF 都带 `/ToUnicode`，第三方阅读器能读回内容
@@ -74,7 +75,9 @@ office_recalculate  { "path": "sales.xlsx", "engine": "auto" }
 
 - **公式不重算**：写公式请同时给缓存值，或用 `office_recalculate`（需开启本地联动）让真实引擎重算
 - **行列移位不重写公式引用**：只调行号与单元格引用，公式文本、合并区域、条件格式会返回警告
-- **大文件**：读取按区域扫描（50 万单元格以内可读全表），但**写入**需要整表建索引 —— 单表 >30 万格默认拒绝（可配置）
+- **大文件（读取已流式）**：工作表部件 >32 MB 时自动改用**流式解压 + 逐行扫描**，内存与部件大小解耦
+  （实测 178.7 MB 部件：峰值 86 MB、读开头 15 ms）；**写入**仍需整表建索引，单表 >30 万格默认拒绝（可配置）
+  —— 因此 100 MB 级文件目前是「**能读不能改**」
 - **不执行宏**：`.xlsm` / `.docm` 的 VBA 按原字节保留，从不执行
 - **视觉无法自证**：版式是否变化、水印好不好看需要渲染成图片才能判定，本机没有光栅化器，因此不做视觉回归
 - **明确不做**：XLSX 透视表修改与高级图表、PPTX 动画编辑、PDF 正向文本编辑 / OCR / 光栅化 / 转回 Office、图片环绕 `tight`/`through`、加密文件解密
@@ -111,15 +114,18 @@ office_recalculate  { "path": "sales.xlsx", "engine": "auto" }
 ## 验证
 
 ```bash
-npm test                      # 13 个套件 / 731 项断言（含保真度、并发、本地联动、审计）
-npm run verify:excel          # 真实 Excel 打开插件输出并读数
-npm run verify:word           # 真实 Word 打开并读数
-npm run verify:pptx           # 真实 PowerPoint 打开并读数
-npm run verify:automation     # 真实引擎重算：写错的公式缓存 999 → 重算成 3
-npm run verify:pdf-cjk        # 中文 PDF：用 Word 的 PDF 解析器独立核对文本
-npm run verify:privacy        # 推前隐私扫描（0 命中才提交）
-
-
+npm test                          # 14 个套件 / 748 项断言（保真度、并发、本地联动、审计、流式）
+npm run verify:excel              # 真实 Excel 打开插件输出并读数
+npm run verify:word               # 真实 Word 打开并读数
+npm run verify:pptx               # 真实 PowerPoint 打开并读数
+npm run verify:automation         # 真实引擎重算：写错的公式缓存 999 → 重算成 3
+npm run verify:pdf-cjk            # 中文 PDF：用 Word 的 PDF 解析器独立核对文本
+npm run verify:pdf-cjk-watermark  # 中文水印：独立核对「原正文还在 + 水印读得到」
+npm run verify:xlsx-huge          # 100 MB 级样本：峰值内存 86 MB / 读开头 15 ms 逐条判定
+npm run verify:audit              # 审计日志：用 .NET 的 JSON 解析器独立读回
+npm run verify:matrix             # Harness 兼容矩阵：装进各版本自己的 dsh-tools（需网络）
+npm run verify:privacy            # 推前隐私扫描（0 命中才提交）
+```
 ```
 
 验证口径是「**第三方能读出才算数**」：例如从零生成的中文 PDF，自家读取器读得出来不算完成，
